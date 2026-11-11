@@ -96,9 +96,6 @@ function PanelDomainForm({ current }: { current: PanelSettings }) {
     <>
       <div className="space-y-1 border-b border-line p-4 text-sm">
         {current.domain ? <CurrentDomain domain={current.domain} httpOnly={current.tls_mode === 'http_only'} /> : <p className="text-muted">{t.settings.noDomain}</p>}
-        <p className="text-xs text-muted">
-          {current.ip_access === false ? t.settings.ipOff : t.settings.ipOn}
-        </p>
       </div>
       <form onSubmit={submit} className="space-y-4 p-4">
         <div className="grid gap-4 sm:grid-cols-2">
@@ -109,7 +106,7 @@ function PanelDomainForm({ current }: { current: PanelSettings }) {
             dir="ltr"
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
-            hint={t.settings.domainHint}
+            hintTooltip hint={t.settings.domainHint}
             autoComplete="off"
             spellCheck={false}
           />
@@ -121,7 +118,7 @@ function PanelDomainForm({ current }: { current: PanelSettings }) {
             dir="ltr"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            hint={t.settings.certEmailHint}
+            hintTooltip hint={t.settings.certEmailHint}
           />
         </div>
         <div className="space-y-3">
@@ -135,11 +132,6 @@ function PanelDomainForm({ current }: { current: PanelSettings }) {
               <>
                 {t.settings.disableIpHint}
                 {!hasDomain && ` ${t.settings.needsDomain}`}
-                {hasDomain && !ipAccess && onIP && (
-                  <span className="mt-1 block text-warn">
-                    {t.settings.onIpWarning}
-                  </span>
-                )}
                 {hasDomain && !ipAccess && (
                   <span className="mt-1 block">
                     {rich(t.settings.lockedOut, {
@@ -154,6 +146,7 @@ function PanelDomainForm({ current }: { current: PanelSettings }) {
               </>
             }
           />
+          {hasDomain && !ipAccess && onIP && <p className="text-xs text-warn">{t.settings.onIpWarning}</p>}
         </div>
         {save.error && <ErrorNote>{save.error.message}</ErrorNote>}
         {notice && <p className="text-xs text-accent">{notice}</p>}

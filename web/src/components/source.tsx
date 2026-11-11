@@ -85,7 +85,7 @@ export function SourceFields({ form, onChange }: { form: SourceForm; onChange: (
           required
           dir="ltr"
           placeholder="nginx:1.27"
-          hint={t.source.imageHint}
+          hintTooltip hint={t.source.imageHint}
           value={form.image}
           onChange={set('image')}
         />
@@ -154,7 +154,7 @@ function GitFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceF
           name="build_context"
           dir="ltr"
           placeholder="."
-          hint={t.source.buildContextHint}
+          hintTooltip hint={t.source.buildContextHint}
           value={form.build_context}
           onChange={set('build_context')}
         />
@@ -164,12 +164,11 @@ function GitFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceF
           required
           dir="ltr"
           placeholder="Dockerfile"
-          hint={t.source.dockerfileHint}
+          hintTooltip hint={t.source.dockerfileHint}
           value={form.dockerfile_path}
           onChange={set('dockerfile_path')}
         />
       </div>
-      <p className="text-xs text-muted">{t.source.deployNote}</p>
     </>
   )
 }

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
-import { Button, ConfirmButton, Empty, ErrorNote, Field, Panel, QueryState } from '../components/ui'
+import { Button, ConfirmButton, Empty, ErrorNote, Field, HelpTip, Panel, QueryState } from '../components/ui'
 import { api, tokensQuery, type ApiToken } from '../lib/api'
 import { dateTime, timeAgo } from '../lib/format'
 import { rich, useT } from '../lib/i18n'
@@ -17,16 +17,9 @@ export function ApiTokens() {
   }
 
   return (
-    <Panel title={t.settingsTokens.title}>
-      <p className="border-b border-line p-4 text-xs text-muted">
-        {rich(t.settingsTokens.intro, {
-          header: () => (
-            <code className="text-fg" dir="ltr">
-              Authorization: Bearer &lt;token&gt;
-            </code>
-          ),
-        })}
-      </p>
+    <Panel title={t.settingsTokens.title} actions={<HelpTip label={t.settingsTokens.title}>
+      {rich(t.settingsTokens.intro, { header: () => <code dir="ltr">Authorization: Bearer &lt;token&gt;</code> })}
+    </HelpTip>}>
       {created ? <NewSecret token={created} onDone={closeSecret} /> : <CreateToken onCreated={setCreated} />}
       {!tokens.data && (
         <div className="border-t border-line p-4">

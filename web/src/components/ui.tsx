@@ -1,6 +1,22 @@
+import { Tooltip } from '@base-ui/react/tooltip'
 import { useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react'
 import { useT } from '../lib/i18n'
 import { LanguagePicker } from './langpicker'
+
+/** Supplemental help is available on hover, keyboard focus, and tap. */
+export function HelpTip({ children, label }: { children: ReactNode; label: string }) {
+  const [open, setOpen] = useState(false)
+  return <Tooltip.Provider delay={150}>
+    <Tooltip.Root open={open} onOpenChange={setOpen}>
+      <Tooltip.Trigger type="button" aria-label={label} onClick={() => setOpen(!open)} className="inline-flex size-4 shrink-0 items-center justify-center rounded-full border border-current text-[10px] leading-none text-muted hover:text-fg focus-visible:outline-2 focus-visible:outline-accent">?</Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Positioner sideOffset={6} className="z-50">
+          <Tooltip.Popup className="max-w-[min(20rem,calc(100vw-2rem))] border border-line bg-raised px-3 py-2 text-xs leading-relaxed text-fg shadow-sm">{children}</Tooltip.Popup>
+        </Tooltip.Positioner>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  </Tooltip.Provider>
+}
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(' ')
@@ -24,15 +40,16 @@ export function Button({ variant = 'primary', className, ...props }: ButtonProps
   )
 }
 
-type FieldProps = InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string }
+type FieldProps = InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string; hintTooltip?: boolean }
 
-export function Field({ label, hint, id, className, ...props }: FieldProps) {
+export function Field({ label, hint, hintTooltip, id, className, ...props }: FieldProps) {
   const inputId = id ?? props.name
   return (
     <div className="space-y-1.5">
-      <label htmlFor={inputId} className="block text-xs text-muted">
-        {label}
-      </label>
+      <div className="flex items-center gap-1.5 text-xs text-muted">
+        <label htmlFor={inputId}>{label}</label>
+        {hint && hintTooltip && <HelpTip label={label}>{hint}</HelpTip>}
+      </div>
       <input
         id={inputId}
         {...props}
@@ -42,7 +59,7 @@ export function Field({ label, hint, id, className, ...props }: FieldProps) {
           className,
         )}
       />
-      {hint && <p className="text-xs text-muted">{hint}</p>}
+      {hint && !hintTooltip && <p className="text-xs text-muted">{hint}</p>}
     </div>
   )
 }
@@ -169,19 +186,13 @@ export function CheckOption(props: {
   disabled?: boolean
 }) {
   return (
-    <label className={cx('flex items-start gap-3 text-sm', props.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}>
-      <input
-        type="checkbox"
-        className="mt-0.5 accent-[var(--color-accent)]"
-        checked={props.checked}
-        disabled={props.disabled}
-        onChange={(e) => props.onChange(e.target.checked)}
-      />
-      <span>
-        {props.label}
-        {props.hint && <span className="block text-xs text-muted">{props.hint}</span>}
-      </span>
-    </label>
+    <div className="flex items-center gap-1.5 text-sm">
+      <label className={cx('flex items-center gap-3', props.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}>
+        <input type="checkbox" className="accent-[var(--color-accent)]" checked={props.checked} disabled={props.disabled} onChange={(e) => props.onChange(e.target.checked)} />
+        <span>{props.label}</span>
+      </label>
+      {props.hint && <HelpTip label={typeof props.label === 'string' ? props.label : '?'}>{props.hint}</HelpTip>}
+    </div>
   )
 }
 

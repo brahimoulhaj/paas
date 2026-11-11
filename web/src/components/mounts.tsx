@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, appQuery, type App, type AppMount } from '../lib/api'
 import { useT } from '../lib/i18n'
-import { Button, ErrorNote, Field, Panel } from './ui'
+import { Button, ErrorNote, Field, HelpTip, Panel } from './ui'
 
 export function MountSettings({ app }: { app: App }) {
   const t = useT().app
@@ -18,9 +18,8 @@ export function MountSettings({ app }: { app: App }) {
     setMounts(mounts.map((m, i) => i === index ? { ...m, ...patch } : m)); setDirty(true)
   }
   function submit(e: FormEvent) { e.preventDefault(); save.mutate() }
-  return <Panel title={t.mountsTitle}>
+  return <Panel title={t.mountsTitle} actions={<HelpTip label={t.mountsTitle}>{t.mountsHint}</HelpTip>}>
     <form onSubmit={submit} className="space-y-4 p-4">
-      <p className="text-xs text-muted">{t.mountsHint}</p>
       <fieldset disabled={save.isPending} className="min-w-0 space-y-3">
         {mounts.length === 0 && <p className="text-xs text-muted">{t.mountsEmpty}</p>}
         {mounts.map((m, i) => <div key={i} className="space-y-3 border border-line p-3">

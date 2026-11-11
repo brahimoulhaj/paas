@@ -1,6 +1,7 @@
 // Texts of the Updates section of Settings.
 
 export const en = {
+  unavailableLabel: 'Unavailable',
   title: 'Updates',
   what: 'update status',
   version: 'Version <v/>',
@@ -33,6 +34,7 @@ export const en = {
 }
 
 export const fr: typeof en = {
+  unavailableLabel: 'Indisponible',
   title: 'Mises à jour',
   what: 'état des mises à jour',
   version: 'Version <v/>',
@@ -66,6 +68,7 @@ export const fr: typeof en = {
 }
 
 export const ar: typeof en = {
+  unavailableLabel: 'غير متاح',
   title: 'التحديثات',
   what: 'حالة التحديث',
   version: 'الإصدار <v/>',
@@ -97,6 +100,7 @@ export const ar: typeof en = {
 }
 
 export const es: typeof en = {
+  unavailableLabel: 'No disponible',
   title: 'Actualizaciones',
   what: 'estado de actualización',
   version: 'Versión <v/>',

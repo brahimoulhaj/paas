@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DnsHintText } from '../components/dns'
 import { LogViewer } from '../components/logviewer'
-import { Badge, Button, ConfirmButton, cx, Empty, ErrorNote, Field, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
+import { Badge, Button, ConfirmButton, cx, Empty, ErrorNote, Field, HelpTip, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
 import {
   api,
   appQuery,
@@ -532,7 +532,7 @@ function Settings({ app }: { app: App }) {
 
   return (
     <div className="space-y-6">
-      <Panel title={t.app.tabs.settings}>
+      <Panel title={t.app.tabs.settings} actions={<HelpTip label={t.app.tabs.settings}>{t.app.appliesNextDeploy}</HelpTip>}>
         <form onSubmit={submit} className="space-y-4 p-4">
           <Field
             label={t.common.name}
@@ -547,10 +547,9 @@ function Settings({ app }: { app: App }) {
           <SourceFields form={source} onChange={setSource} />
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label={t.app.containerPort} name="port" dir="ltr" type="number" required min={1} max={65535} value={form.port} onChange={set('port')} />
-            <Field label={t.app.cpuLimit} name="cpu" dir="ltr" type="number" min={0} max={256} step="0.05" hint={t.app.zeroUnlimited} value={form.cpu} onChange={set('cpu')} />
-            <Field label={t.app.memoryLimit} name="memory" dir="ltr" type="number" min={0} step="1" hint={t.app.zeroUnlimited} value={form.memory} onChange={set('memory')} />
+            <Field label={t.app.cpuLimit} name="cpu" dir="ltr" type="number" min={0} max={256} step="0.05" hintTooltip hint={t.app.zeroUnlimited} value={form.cpu} onChange={set('cpu')} />
+            <Field label={t.app.memoryLimit} name="memory" dir="ltr" type="number" min={0} step="1" hintTooltip hint={t.app.zeroUnlimited} value={form.memory} onChange={set('memory')} />
           </div>
-          <p className="text-xs text-muted">{t.app.appliesNextDeploy}</p>
           {save.error && <ErrorNote>{save.error.message}</ErrorNote>}
           {save.isSuccess && !dirty && <p className="text-xs text-accent">{t.common.saved}</p>}
           <Button type="submit" disabled={!dirty || save.isPending}>

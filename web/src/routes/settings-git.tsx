@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, type FormEvent } from 'react'
-import { Badge, Button, ConfirmButton, Empty, ErrorNote, Field, Panel, QueryState } from '../components/ui'
+import { Badge, Button, ConfirmButton, Empty, ErrorNote, Field, HelpTip, Panel, QueryState } from '../components/ui'
 import { api, gitSourcesQuery, type GitHubManifest, type GitSource } from '../lib/api'
 import { dateTime, timeAgo } from '../lib/format'
 import { rich, useT } from '../lib/i18n'
@@ -15,7 +15,7 @@ export function GitConnections() {
 
   return (
     <Panel
-      title={t.settingsGit.title}
+      title={<span className="inline-flex items-center gap-2">{t.settingsGit.title}<HelpTip label={t.settingsGit.title}>{t.settingsGit.intro}</HelpTip></span>}
       actions={
         !adding && (
           <span className="flex gap-2">
@@ -29,9 +29,6 @@ export function GitConnections() {
         )
       }
     >
-      <p className="border-b border-line p-4 text-xs text-muted">
-        {t.settingsGit.intro}
-      </p>
       {callbackError && (
         <div className="border-b border-line p-4">
           <ErrorNote>{t.settingsGit.notConnected(callbackError)}</ErrorNote>

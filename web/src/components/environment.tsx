@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, appQuery, appsQuery, type App } from '../lib/api'
 import { environmentMap, parseEnvironment, serializeEnvironment, type EnvironmentRow } from '../lib/environment'
 import { useT } from '../lib/i18n'
-import { Button, ErrorNote, Field, Panel } from './ui'
+import { Button, ErrorNote, Field, HelpTip, Panel } from './ui'
 
 export function EnvironmentSettings({ app }: { app: App }) {
   const t = useT().app
@@ -34,15 +34,14 @@ export function EnvironmentSettings({ app }: { app: App }) {
     try { const next = bulk ? parseEnvironment(text) : rows; const values = environmentMap(next); setRows(next); setError(''); save.mutate(values) }
     catch { setError(t.environmentInvalid) }
   }
-  return <Panel title={t.environment}>
+  return <Panel title={t.environment} actions={<HelpTip label={t.environment}>{t.environmentHint}</HelpTip>}>
     <form onSubmit={submit} className="space-y-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-muted">{t.environmentHint}</p>
         <Button type="button" variant="ghost" disabled={save.isPending} onClick={switchMode}>{bulk ? t.environmentFields : t.environmentBulk}</Button>
       </div>
       <fieldset disabled={save.isPending} className="min-w-0 space-y-3">
         {bulk ? <>
-          <p className="text-xs text-muted">{t.environmentFormat}</p>
+          <div className="flex items-center gap-1.5 text-xs text-muted">{t.environmentBulk}<HelpTip label={t.environmentBulk}>{t.environmentFormat}</HelpTip></div>
           <textarea aria-label={t.environmentBulk} dir="ltr" spellCheck={false} value={text} onChange={(e) => { setText(e.target.value); setChanged(true) }} className="min-h-64 w-full resize-y border border-line bg-bg p-3 font-mono text-xs text-fg focus:border-accent focus:outline-none" placeholder={'APP_ENV=production\nPORT=8080'} />
         </> : <>
           {rows.length === 0 && <p className="text-xs text-muted">{t.environmentEmpty}</p>}

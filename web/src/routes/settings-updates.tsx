@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
-import { Badge, Button, ErrorNote, Panel, QueryState } from '../components/ui'
+import { Badge, Button, CheckOption, HelpTip, ErrorNote, Panel, QueryState } from '../components/ui'
 import { api, updatesQuery, type Updates } from '../lib/api'
 import { dateTime, timeAgo } from '../lib/format'
 import { rich, useT } from '../lib/i18n'
@@ -45,9 +45,10 @@ function UpdatesBody({ u }: { u: Updates }) {
 
   if (!u.supported) {
     return (
-      <div className="space-y-1 p-4 text-sm">
+      <div className="flex items-center gap-2 p-4 text-sm">
         <p>{rich(t.settingsUpdates.version, { v: () => <span className="text-fg" dir="ltr">{u.version}</span> })}</p>
-        <p className="text-xs text-muted">{t.settingsUpdates.unavailable(u.reason ?? '')}</p>
+        <span className="text-xs text-muted">{t.settingsUpdates.unavailableLabel}</span>
+        <HelpTip label={t.settingsUpdates.title}>{t.settingsUpdates.unavailable(u.reason ?? '')}</HelpTip>
       </div>
     )
   }
@@ -65,13 +66,9 @@ function UpdatesBody({ u }: { u: Updates }) {
               u.checked_at && !u.error && <Badge tone="muted">{t.settingsUpdates.upToDate}</Badge>
             )}
           </p>
-          <p className="text-xs [overflow-wrap:anywhere] text-muted">
-            <bdi dir="ltr">{u.image}</bdi>
-          </p>
           <p className="text-xs text-muted" title={dateTime(u.checked_at ?? null)}>
             {u.checked_at ? t.settingsUpdates.checked(timeAgo(u.checked_at)) : t.settingsUpdates.notChecked}
-            {' · '}
-            {u.mode === 'digest' ? t.settingsUpdates.followsDigest : t.settingsUpdates.followsTags}
+
           </p>
         </div>
         <Button variant="ghost" type="button" disabled={busy || check.isPending} onClick={() => check.mutate()}>
@@ -112,19 +109,7 @@ function UpdatesBody({ u }: { u: Updates }) {
         </div>
       )}
 
-      <label className="flex cursor-pointer items-start gap-3 p-4 text-sm">
-        <input
-          type="checkbox"
-          className="mt-0.5 accent-[var(--color-accent)]"
-          checked={u.auto}
-          disabled={auto.isPending}
-          onChange={(e) => auto.mutate(e.target.checked)}
-        />
-        <span>
-          {t.settingsUpdates.auto}
-          <span className="block text-xs text-muted">{t.settingsUpdates.autoHint}</span>
-        </span>
-      </label>
+      <div className="p-4"><CheckOption checked={u.auto} disabled={auto.isPending} onChange={(on) => auto.mutate(on)} label={t.settingsUpdates.auto} hint={t.settingsUpdates.autoHint} /></div>
       {auto.error && (
         <div className="px-4 pb-4">
           <ErrorNote>{auto.error.message}</ErrorNote>
