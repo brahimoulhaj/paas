@@ -55,10 +55,16 @@ make test               # go vet, go test, web typecheck
 make image VERSION=0.1.0
 ```
 
+## Releases
+
+Push a tag `vX.Y.Z`: the Release workflow publishes `ghcr.io/brahimoulhaj/paas:X.Y.Z` (and
+`:latest`) for amd64 and arm64 and attaches the matching `install.sh` to a GitHub release.
+Installed panels see the new tag in Settings → Updates.
+
 ## Install on a server
 
 ```sh
-make image VERSION=0.1.0                       # or IMAGE=ghcr.io/you/berth to tag for a registry
+make image VERSION=0.1.0                       # local build, tagged ghcr.io/brahimoulhaj/paas:0.1.0
 make installer VERSION=0.1.0 [IMAGE=...]       # writes bin/install.sh from install/install.sh.tmpl
 ```
 
