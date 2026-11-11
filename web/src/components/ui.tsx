@@ -1,4 +1,4 @@
-import { useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react'
+import { useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(' ')
@@ -40,6 +40,32 @@ export function Field({ label, hint, id, className, ...props }: FieldProps) {
           className,
         )}
       />
+      {hint && <p className="text-xs text-muted">{hint}</p>}
+    </div>
+  )
+}
+
+type SelectFieldProps = SelectHTMLAttributes<HTMLSelectElement> & { label: string; hint?: ReactNode }
+
+/** A select that looks like Field. */
+export function SelectField({ label, hint, id, className, children, ...props }: SelectFieldProps) {
+  const selectId = id ?? props.name
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={selectId} className="block text-xs text-muted">
+        {label}
+      </label>
+      <select
+        id={selectId}
+        {...props}
+        className={cx(
+          'block h-9 w-full border border-line bg-bg px-2 text-sm text-fg',
+          'focus:border-accent focus:outline-none disabled:opacity-60',
+          className,
+        )}
+      >
+        {children}
+      </select>
       {hint && <p className="text-xs text-muted">{hint}</p>}
     </div>
   )

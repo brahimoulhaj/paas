@@ -6,7 +6,9 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -36,8 +38,10 @@ type Deployer interface {
 func (s *Server) SetDeployer(d Deployer) { s.deployer = d }
 
 var (
-	appNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
-	imageRe   = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,254}$`)
+	appNameRe  = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$`)
+	imageRe    = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/:@-]{0,254}$`)
+	branchRe   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$`)
+	repoPathRe = regexp.MustCompile(`^[A-Za-z0-9._/-]{1,200}$`)
 )
 
 // ---- JSON shapes ----
@@ -66,6 +70,12 @@ type appJSON struct {
 	MemoryLimitMB       int64     `json:"memory_limit_mb"`
 	DesiredState        string    `json:"desired_state"`
 	CurrentDeploymentID string    `json:"current_deployment_id"`
+	GitSourceID         string    `json:"git_source_id"`
+	GitRepository       string    `json:"git_repository"`
+	GitBranch           string    `json:"git_branch"`
+	Builder             string    `json:"builder"`
+	BuildContext        string    `json:"build_context"`
+	DockerfilePath      string    `json:"dockerfile_path"`
 	RuntimeState        string    `json:"runtime_state,omitempty"` // single-app responses only
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
@@ -75,7 +85,11 @@ func toAppJSON(a store.App) appJSON {
 	return appJSON{
 		ID: a.ID, ProjectID: a.ProjectID, Name: a.Name, SourceType: a.SourceType, Image: a.Image, Port: a.Port,
 		CPULimit: a.CPULimit, MemoryLimitMB: a.MemoryMB, DesiredState: a.DesiredState,
-		CurrentDeploymentID: a.CurrentDeploymentID, CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
+		CurrentDeploymentID: a.CurrentDeploymentID,
+		GitSourceID:         a.Git.ConnectionID,
+		GitRepository:       a.Git.Repository, GitBranch: a.Git.Branch, Builder: a.Git.Builder,
+		BuildContext: a.Git.BuildContext, DockerfilePath: a.Git.Dockerfile,
+		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
 	}
 }
 
@@ -85,6 +99,7 @@ type deploymentJSON struct {
 	Status        string     `json:"status"`
 	Trigger       string     `json:"trigger"`
 	Image         string     `json:"image"`
+	CommitSHA     string     `json:"commit_sha"`
 	Port          int        `json:"port"`
 	ContainerName string     `json:"container_name"`
 	Error         string     `json:"error"`
@@ -95,7 +110,7 @@ type deploymentJSON struct {
 
 func toDeploymentJSON(d store.Deployment) deploymentJSON {
 	out := deploymentJSON{
-		ID: d.ID, AppID: d.AppID, Status: d.Status, Trigger: d.Trigger, Image: d.Image, Port: d.Port,
+		ID: d.ID, AppID: d.AppID, Status: d.Status, Trigger: d.Trigger, Image: d.Image, CommitSHA: d.CommitSHA, Port: d.Port,
 		ContainerName: d.ContainerName, Error: d.Error, CreatedAt: d.CreatedAt,
 	}
 	if !d.StartedAt.IsZero() {
@@ -283,12 +298,116 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 
 // ---- apps ----
 
+// appFields is the JSON of the settable app fields. Every field is optional: a create
+// starts from defaults, an update from the app as it is.
+type appFields struct {
+	Name           *string  `json:"name"`
+	SourceType     *string  `json:"source_type"`
+	Image          *string  `json:"image"`
+	GitSourceID    *string  `json:"git_source_id"`
+	GitRepository  *string  `json:"git_repository"`
+	GitBranch      *string  `json:"git_branch"`
+	Builder        *string  `json:"builder"`
+	BuildContext   *string  `json:"build_context"`
+	DockerfilePath *string  `json:"dockerfile_path"`
+	Port           *int     `json:"port"`
+	CPULimit       *float64 `json:"cpu_limit"`
+	MemoryLimitMB  *int64   `json:"memory_limit_mb"`
+}
+
+// apply sets the fields present in f on in, trimmed, and fills Git defaults.
+func (f appFields) apply(in store.AppInput) store.AppInput {
+	str := func(dst *string, v *string) {
+		if v != nil {
+			*dst = strings.TrimSpace(*v)
+		}
+	}
+	str(&in.Name, f.Name)
+	str(&in.SourceType, f.SourceType)
+	str(&in.Image, f.Image)
+	str(&in.Git.ConnectionID, f.GitSourceID)
+	str(&in.Git.Repository, f.GitRepository)
+	str(&in.Git.Branch, f.GitBranch)
+	str(&in.Git.Builder, f.Builder)
+	str(&in.Git.BuildContext, f.BuildContext)
+	str(&in.Git.Dockerfile, f.DockerfilePath)
+	if f.Port != nil {
+		in.Port = *f.Port
+	}
+	if f.CPULimit != nil {
+		in.CPULimit = *f.CPULimit
+	}
+	if f.MemoryLimitMB != nil {
+		in.MemoryMB = *f.MemoryLimitMB
+	}
+	if in.SourceType == "" {
+		in.SourceType = store.SourceImage
+	}
+	if in.SourceType == store.SourceGit {
+		if in.Git.Branch == "" {
+			in.Git.Branch = "main"
+		}
+		if in.Git.Builder == "" {
+			in.Git.Builder = store.BuilderDockerfile
+		}
+		if in.Git.Dockerfile == "" {
+			in.Git.Dockerfile = "Dockerfile"
+		}
+		in.Git.BuildContext = cleanRepoPath(in.Git.BuildContext)
+		in.Git.Dockerfile = cleanRepoPath(in.Git.Dockerfile)
+	}
+	return in
+}
+
+// cleanRepoPath tidies a path inside a repository: forward slashes, no leading "./" or
+// trailing slash, and "" for the root.
+func cleanRepoPath(p string) string {
+	if p == "" {
+		return ""
+	}
+	p = path.Clean(strings.TrimPrefix(p, "./"))
+	if p == "." {
+		return ""
+	}
+	return p
+}
+
+// validRepoPath accepts a relative path that stays inside the repository.
+func validRepoPath(p string) bool {
+	return repoPathRe.MatchString(p) && !path.IsAbs(p) && p != ".." && !strings.HasPrefix(p, "../")
+}
+
+// validGitURL accepts the https URL of a public repository, without credentials in it.
+func validGitURL(raw string) bool {
+	if len(raw) > 500 || strings.ContainsAny(raw, " \t\r\n") {
+		return false
+	}
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.Path != "" && u.Path != "/" &&
+		u.RawQuery == "" && u.Fragment == ""
+}
+
 func validApp(w http.ResponseWriter, in store.AppInput) bool {
+	g := in.Git
+	git := in.SourceType == store.SourceGit
 	switch {
 	case !appNameRe.MatchString(in.Name):
 		invalid(w, "name must be 1 to 40 lowercase letters, digits or dashes, and not start or end with a dash")
-	case !imageRe.MatchString(in.Image) || strings.Contains(in.Image, ".."):
+	case in.SourceType != store.SourceImage && !git:
+		invalid(w, "source_type must be image or git")
+	case !git && (!imageRe.MatchString(in.Image) || strings.Contains(in.Image, "..")):
 		invalid(w, "image must be an image reference like nginx:1.27 or ghcr.io/org/app:tag")
+	case git && !validGitURL(g.Repository):
+		invalid(w, "git_repository must be the https URL of a repository, like https://github.com/org/app.git")
+	case git && (!branchRe.MatchString(g.Branch) || strings.Contains(g.Branch, "..") ||
+		strings.HasSuffix(g.Branch, "/") || strings.HasSuffix(g.Branch, ".lock")):
+		invalid(w, "git_branch must be a branch name like main or release/2.0")
+	case git && g.Builder != store.BuilderDockerfile:
+		invalid(w, "builder must be dockerfile")
+	case git && g.BuildContext != "" && !validRepoPath(g.BuildContext):
+		invalid(w, "build_context must be a folder inside the repository, like . or services/api")
+	case git && !validRepoPath(g.Dockerfile):
+		invalid(w, "dockerfile_path must be a file inside the build context, like Dockerfile")
 	case in.Port < 1 || in.Port > 65535:
 		invalid(w, "port must be between 1 and 65535")
 	case in.CPULimit < 0 || in.CPULimit > 256:
@@ -315,28 +434,23 @@ func (s *Server) handleListApps(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Name          string  `json:"name"`
-		Image         string  `json:"image"`
-		Port          int     `json:"port"`
-		CPULimit      float64 `json:"cpu_limit"`
-		MemoryLimitMB int64   `json:"memory_limit_mb"`
-	}
+	var in appFields
 	if !readJSON(w, r, &in) {
 		return
 	}
-	input := store.AppInput{
-		Name: strings.TrimSpace(in.Name), Image: strings.TrimSpace(in.Image), Port: in.Port,
-		CPULimit: in.CPULimit, MemoryMB: in.MemoryLimitMB,
-	}
-	if !validApp(w, input) {
+	input := in.apply(store.AppInput{})
+	if !validApp(w, input) || !s.validGitSource(w, r, input) {
 		return
 	}
 	a, err := s.store.CreateApp(r.Context(), r.PathValue("id"), input)
 	if s.storeError(w, "create app", err, "an app with this name already exists in the project") {
 		return
 	}
-	s.audit(r, "app.create", "app", a.ID, a.Name, a.Image)
+	detail := a.Image
+	if a.SourceType == store.SourceGit {
+		detail = a.Git.Repository + " (" + a.Git.Branch + ")"
+	}
+	s.audit(r, "app.create", "app", a.ID, a.Name, detail)
 	writeJSON(w, http.StatusCreated, toAppJSON(a))
 }
 
@@ -352,16 +466,10 @@ func (s *Server) handleGetApp(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleUpdateApp changes settings only. Image, port and limits take effect with the next
+// handleUpdateApp changes settings only. Source, port and limits take effect with the next
 // deploy; the running container is left alone.
 func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
-	var in struct {
-		Name          *string  `json:"name"`
-		Image         *string  `json:"image"`
-		Port          *int     `json:"port"`
-		CPULimit      *float64 `json:"cpu_limit"`
-		MemoryLimitMB *int64   `json:"memory_limit_mb"`
-	}
+	var in appFields
 	if !readJSON(w, r, &in) {
 		return
 	}
@@ -369,23 +477,11 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	if s.storeError(w, "get app", err, "") {
 		return
 	}
-	input := store.AppInput{Name: a.Name, Image: a.Image, Port: a.Port, CPULimit: a.CPULimit, MemoryMB: a.MemoryMB}
-	if in.Name != nil {
-		input.Name = strings.TrimSpace(*in.Name)
-	}
-	if in.Image != nil {
-		input.Image = strings.TrimSpace(*in.Image)
-	}
-	if in.Port != nil {
-		input.Port = *in.Port
-	}
-	if in.CPULimit != nil {
-		input.CPULimit = *in.CPULimit
-	}
-	if in.MemoryLimitMB != nil {
-		input.MemoryMB = *in.MemoryLimitMB
-	}
-	if !validApp(w, input) {
+	input := in.apply(store.AppInput{
+		Name: a.Name, SourceType: a.SourceType, Image: a.Image, Git: a.Git,
+		Port: a.Port, CPULimit: a.CPULimit, MemoryMB: a.MemoryMB,
+	})
+	if !validApp(w, input) || !s.validGitSource(w, r, input) {
 		return
 	}
 	a, err = s.store.UpdateApp(r.Context(), a.ID, input)

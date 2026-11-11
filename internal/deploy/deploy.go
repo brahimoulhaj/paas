@@ -1,6 +1,7 @@
 // Package deploy turns an app's settings into a running container and keeps the proxy
-// pointed at it. This is the minimal pipeline: pull, start, switch the route, remove the
-// old container. Health checks, draining and rollback build on it later.
+// pointed at it. This is the minimal pipeline: pull (or, for a Git app, fetch and build),
+// start, switch the route, remove the old container. Health checks, draining and rollback
+// build on it later.
 package deploy
 
 import (
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"panel/internal/builder"
 	"panel/internal/executor"
 	"panel/internal/store"
 )
@@ -33,11 +35,26 @@ type Router interface {
 	SetUpstreams(ctx context.Context, routeID string, upstreams []string) error
 }
 
+// Builder fetches and builds Git apps; *builder.Local implements it.
+type Builder interface {
+	// Fetch clones the branch tip into dir and returns the commit.
+	Fetch(ctx context.Context, src store.GitSource, auth builder.Auth, dir string, line builder.LineFunc) (string, error)
+	// Build builds dir into the local image tag.
+	Build(ctx context.Context, src store.GitSource, dir, tag, appID string, line builder.LineFunc) error
+}
+
+// GitAuth hands out credentials for private repositories; *gitsource.Service implements it.
+type GitAuth interface {
+	Credentials(ctx context.Context, connectionID, repository string) (builder.Auth, error)
+}
+
 type Options struct {
 	Store    *store.Store
 	Executor executor.Executor
-	Router   Router // nil: no proxy, routes are not touched
-	DataDir  string // deployment logs live in <DataDir>/deployments
+	Router   Router  // nil: no proxy, routes are not touched
+	Builder  Builder // nil: Git apps cannot be deployed
+	GitAuth  GitAuth // nil: only public repositories
+	DataDir  string  // deployment logs live in <DataDir>/deployments, build workspaces in <DataDir>/builds
 	Log      *slog.Logger
 	// StartGrace is how long a new container must stay up before traffic is switched to
 	// it. It catches images that crash on start; real health checks replace it later.
@@ -88,6 +105,10 @@ func (s *Service) release(appID string) {
 // Recover closes deployments a previous panel process left unfinished. Call it once at
 // startup, before any new deploy.
 func (s *Service) Recover(ctx context.Context) (int, error) {
+	// Workspaces of builds the previous process did not finish.
+	if err := os.RemoveAll(filepath.Join(s.opts.DataDir, "builds")); err != nil {
+		s.opts.Log.Error("remove old build workspaces", "error", err)
+	}
 	return s.opts.Store.FailUnfinishedDeployments(ctx, "interrupted: the panel restarted during this deployment")
 }
 
@@ -150,26 +171,21 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 		fail("", err)
 		return
 	}
-	logw.printf("Deploying %s (image %s)", app.Name, app.Image)
-
-	// 1. Pull.
-	logw.printf("Pulling image %s", app.Image)
-	last := map[string]string{}
-	err := ex.PullImage(ctx, app.Image, func(p executor.PullProgress) {
-		// One line per layer per status change, not one per progress tick.
-		if p.Status == "" || last[p.Layer] == p.Status {
+	// 1. Pull the image, or build it from Git.
+	image := app.Image
+	if app.SourceType == store.SourceGit {
+		logw.printf("Deploying %s from %s (branch %s)", app.Name, app.Git.Repository, app.Git.Branch)
+		var err error
+		if image, err = s.build(ctx, final, app, dep, logw); err != nil {
+			fail("", err)
 			return
 		}
-		last[p.Layer] = p.Status
-		if p.Layer == "" {
-			logw.printf("  %s", p.Status)
-		} else {
-			logw.printf("  %s: %s", p.Layer, p.Status)
+	} else {
+		logw.printf("Deploying %s (image %s)", app.Name, app.Image)
+		if err := s.pull(ctx, image, logw); err != nil {
+			fail("", err)
+			return
 		}
-	})
-	if err != nil {
-		fail("", err)
-		return
 	}
 
 	// 2. Create and start the new container next to the old one.
@@ -177,7 +193,7 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 	logw.printf("Creating container %s", name)
 	containerID, err := ex.CreateContainer(ctx, executor.ContainerSpec{
 		Name:       name,
-		Image:      app.Image,
+		Image:      image,
 		Kind:       executor.KindApp,
 		ResourceID: app.ID,
 		Labels:     map[string]string{"deployment": dep.ID},
@@ -247,6 +263,79 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 	}
 	s.event(final, "deployment.succeeded", app, "")
 	s.opts.Log.Info("deployment succeeded", "app", app.Name, "deployment", dep.ID)
+}
+
+// pull pulls an image, logging one line per layer per status change.
+func (s *Service) pull(ctx context.Context, image string, logw *logWriter) error {
+	logw.printf("Pulling image %s", image)
+	last := map[string]string{}
+	return s.opts.Executor.PullImage(ctx, image, func(p executor.PullProgress) {
+		// One line per layer per status change, not one per progress tick.
+		if p.Status == "" || last[p.Layer] == p.Status {
+			return
+		}
+		last[p.Layer] = p.Status
+		if p.Layer == "" {
+			logw.printf("  %s", p.Status)
+		} else {
+			logw.printf("  %s: %s", p.Layer, p.Status)
+		}
+	})
+}
+
+// build fetches a Git app at its branch tip and builds it into a local image, which it
+// returns. The workspace is removed afterwards, whatever happens.
+func (s *Service) build(ctx, final context.Context, app store.App, dep store.Deployment, logw *logWriter) (string, error) {
+	if s.opts.Builder == nil {
+		return "", errors.New("this panel cannot build from Git")
+	}
+	st, src := s.opts.Store, app.Git
+	dir := filepath.Join(s.opts.DataDir, "builds", dep.ID)
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		return "", err
+	}
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			s.opts.Log.Error("remove build workspace", "error", err)
+		}
+	}()
+	out := func(l string) { logw.printf("  | %s", l) }
+
+	var auth builder.Auth
+	if src.ConnectionID != "" {
+		if s.opts.GitAuth == nil {
+			return "", errors.New("this panel cannot fetch private repositories")
+		}
+		var err error
+		if auth, err = s.opts.GitAuth.Credentials(ctx, src.ConnectionID, src.Repository); err != nil {
+			return "", fmt.Errorf("git connection: %w", err)
+		}
+	}
+	logw.printf("Fetching branch %s", src.Branch)
+	commit, err := s.opts.Builder.Fetch(ctx, src, auth, dir, out)
+	if err != nil {
+		return "", err
+	}
+	logw.printf("Commit %s", commit)
+	if err := st.SetDeploymentCommit(final, dep.ID, commit); err != nil {
+		return "", err
+	}
+
+	tag := imageTag(app.ID, commit)
+	logw.printf("Building image %s (builder: %s)", tag, src.Builder)
+	if err := s.opts.Builder.Build(ctx, src, dir, tag, app.ID, out); err != nil {
+		return "", err
+	}
+	if err := st.SetDeploymentImage(final, dep.ID, tag); err != nil {
+		return "", err
+	}
+	logw.printf("Built image %s", tag)
+	return tag, nil
+}
+
+// imageTag names the image built from one commit of an app: "app-<app id>:<commit>".
+func imageTag(appID, commit string) string {
+	return strings.ToLower("app-"+appID) + ":" + commit
 }
 
 // waitStable gives the container StartGrace to prove it does not crash on start. Under

@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState, type FormEvent } from 'react'
 import { DnsHintText } from '../components/dns'
 import { Link } from '@tanstack/react-router'
+import { GitConnections } from './settings-git'
 import { ApiTokens } from './settings-tokens'
 import { PanelUpdates } from './settings-updates'
 import { Button, CheckOption, ConfirmButton, ErrorNote, Field, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
@@ -20,6 +21,7 @@ export function SettingsPage() {
       />
       <PanelUpdates />
       <PanelDomain />
+      <GitConnections />
       <ApiTokens />
     </div>
   )

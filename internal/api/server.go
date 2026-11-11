@@ -12,6 +12,7 @@ import (
 
 	"panel/internal/account"
 	"panel/internal/brand"
+	"panel/internal/gitsource"
 	"panel/internal/store"
 )
 
@@ -25,6 +26,7 @@ type Server struct {
 	proxy    ProxyApplier
 	deployer Deployer
 	updater  Updater
+	git      *gitsource.Service
 
 	logPoll  time.Duration // how often a deployment log stream looks for new lines
 	stop     chan struct{} // closed when the server shuts down; ends open streams
@@ -78,6 +80,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/tokens", s.requireAuth(sessionOnly(s.handleListTokens)))
 	mux.HandleFunc("POST /api/tokens", s.requireAuth(sessionOnly(s.handleCreateToken)))
 	mux.HandleFunc("DELETE /api/tokens/{id}", s.requireAuth(sessionOnly(s.handleDeleteToken)))
+
+	mux.HandleFunc("GET /api/git-sources", s.requireAuth(s.withGit(s.handleListGitSources)))
+	mux.HandleFunc("POST /api/git-sources/gitlab", s.requireAuth(s.withGit(s.handleAddGitLab)))
+	mux.HandleFunc("POST /api/git-sources/github", s.requireAuth(s.withGit(s.handleStartGitHub)))
+	mux.HandleFunc("GET "+gitsource.CallbackPath, s.requireAuth(s.withGit(s.handleGitHubCallback)))
+	mux.HandleFunc("DELETE /api/git-sources/{id}", s.requireAuth(s.withGit(s.handleDeleteGitSource)))
+	mux.HandleFunc("GET /api/git-sources/{id}/repos", s.requireAuth(s.withGit(s.handleGitSourceRepos)))
+	mux.HandleFunc("GET /api/git-sources/{id}/branches", s.requireAuth(s.withGit(s.handleGitSourceBranches)))
 
 	mux.HandleFunc("GET /api/projects", s.requireAuth(s.handleListProjects))
 	mux.HandleFunc("POST /api/projects", s.requireAuth(s.handleCreateProject))

@@ -18,7 +18,8 @@ import {
   type Deployment,
   type Domain,
 } from '../lib/api'
-import { appStatus, dateTime, duration, timeAgo, type Tone } from '../lib/format'
+import { SourceFields, sourceChanged, sourceForm, sourceInput } from '../components/source'
+import { appSource, appStatus, dateTime, deploymentVersion, duration, repoName, timeAgo, type Tone } from '../lib/format'
 
 export const appTabs = ['overview', 'deployments', 'logs', 'domains', 'settings'] as const
 export type AppTab = (typeof appTabs)[number]
@@ -90,7 +91,7 @@ export function AppPage() {
             {a.name} <Badge tone={status.tone}>{status.label}</Badge>
           </>
         }
-        subtitle={a.image}
+        subtitle={appSource(a)}
         actions={
           <>
             {deployed && a.desired_state === 'running' && (
@@ -159,21 +160,32 @@ function Overview({ app, latest, onOpenDeployments }: { app: App; latest?: Deplo
   const domains = useQuery(domainsQuery(app.id))
   const deployments = useQuery(deploymentsQuery(app.id))
   const current = deployments.data?.find((d) => d.id === app.current_deployment_id)
-  const pending = current && (current.image !== app.image || current.port !== app.port)
+  // A Git deployment does not record the settings it was built with; only the port is compared.
+  const pending = current && ((app.source_type === 'image' && current.image !== app.image) || current.port !== app.port)
 
   return (
     <div className="space-y-6">
       {!app.current_deployment_id && !(latest && isActive(latest)) && (
         <Panel>
           <Empty title="This app has never been deployed.">
-            Press Deploy to pull <span className="text-fg">{app.image}</span> and start it.
+            {app.source_type === 'git' ? (
+              <>
+                Press Deploy to fetch <span className="text-fg">{repoName(app.git_repository)}</span> at{' '}
+                <span className="text-fg">{app.git_branch}</span>, build it and start it.
+              </>
+            ) : (
+              <>
+                Press Deploy to pull <span className="text-fg">{app.image}</span> and start it.
+              </>
+            )}
             {latest?.status === 'failed' && ' The last attempt failed; its log is under Deployments.'}
           </Empty>
         </Panel>
       )}
       {pending && (
         <p className="border border-warn/60 px-3 py-2 text-xs text-warn">
-          Settings changed since the last deploy (deployed: {current.image}, port {current.port}). Redeploy to apply them.
+          Settings changed since the last deploy (deployed: {deploymentVersion(current)}, port {current.port}). Redeploy to
+          apply them.
         </p>
       )}
       {latest?.status === 'failed' && app.current_deployment_id && (
@@ -187,7 +199,19 @@ function Overview({ app, latest, onOpenDeployments }: { app: App; latest?: Deplo
       )}
       <Panel title="Summary">
         <dl className="grid gap-px bg-line sm:grid-cols-2">
-          <Fact label="Image">{app.image}</Fact>
+          {app.source_type === 'git' ? (
+            <>
+              <Fact label="Repository">
+                <a href={app.git_repository} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                  {repoName(app.git_repository)}
+                </a>{' '}
+                · {app.git_branch}
+              </Fact>
+              <Fact label="Dockerfile">{[app.build_context, app.dockerfile_path].filter(Boolean).join('/')}</Fact>
+            </>
+          ) : (
+            <Fact label="Image">{app.image}</Fact>
+          )}
           <Fact label="Container port">{app.port}</Fact>
           <Fact label="Limits">
             {app.cpu_limit > 0 ? `${app.cpu_limit} CPU` : 'CPU unlimited'} ·{' '}
@@ -197,7 +221,7 @@ function Overview({ app, latest, onOpenDeployments }: { app: App; latest?: Deplo
           <Fact label="Running version">
             {current ? (
               <span title={dateTime(current.finished_at)}>
-                {current.image} · deployed {timeAgo(current.finished_at)}
+                {deploymentVersion(current)} · deployed {timeAgo(current.finished_at)}
               </span>
             ) : (
               '—'
@@ -273,7 +297,7 @@ function Deployments(props: {
                       <Badge tone={deployTone[d.status]}>{d.status}</Badge>
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm">
-                      {d.image}
+                      {deploymentVersion(d)}
                       {d.id === props.currentId && <span className="ml-2 text-xs text-accent">live</span>}
                     </span>
                     <span className="w-full shrink-0 text-xs text-muted sm:w-auto" title={dateTime(d.created_at)}>
@@ -437,24 +461,24 @@ function DomainRow({ domain, onRemoved }: { domain: Domain; onRemoved: () => voi
 function Settings({ app }: { app: App }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const [source, setSource] = useState(sourceForm(app))
   const [form, setForm] = useState({
     name: app.name,
-    image: app.image,
     port: String(app.port),
     cpu: String(app.cpu_limit),
     memory: String(app.memory_limit_mb),
   })
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value })
   const input: AppInput = {
+    ...sourceInput(source),
     name: form.name,
-    image: form.image.trim(),
     port: Number(form.port),
     cpu_limit: Number(form.cpu),
     memory_limit_mb: Number(form.memory),
   }
   const dirty =
     input.name !== app.name ||
-    input.image !== app.image ||
+    sourceChanged(source, app) ||
     input.port !== app.port ||
     input.cpu_limit !== app.cpu_limit ||
     input.memory_limit_mb !== app.memory_limit_mb
@@ -484,24 +508,22 @@ function Settings({ app }: { app: App }) {
     <div className="space-y-6">
       <Panel title="Settings">
         <form onSubmit={submit} className="space-y-4 p-4">
-          <div className="grid gap-4 sm:grid-cols-[1fr_2fr]">
-            <Field
-              label="Name"
-              name="name"
-              required
-              pattern="[a-z0-9]([a-z0-9\-]{0,38}[a-z0-9])?"
-              title="Lowercase letters, digits and dashes"
-              value={form.name}
-              onChange={set('name')}
-            />
-            <Field label="Image" name="image" required value={form.image} onChange={set('image')} />
-          </div>
+          <Field
+            label="Name"
+            name="name"
+            required
+            pattern="[a-z0-9]([a-z0-9\-]{0,38}[a-z0-9])?"
+            title="Lowercase letters, digits and dashes"
+            value={form.name}
+            onChange={set('name')}
+          />
+          <SourceFields form={source} onChange={setSource} />
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label="Container port" name="port" type="number" required min={1} max={65535} value={form.port} onChange={set('port')} />
             <Field label="CPU limit (cores)" name="cpu" type="number" min={0} max={256} step="0.05" hint="0 = unlimited" value={form.cpu} onChange={set('cpu')} />
             <Field label="Memory limit (MB)" name="memory" type="number" min={0} step="1" hint="0 = unlimited" value={form.memory} onChange={set('memory')} />
           </div>
-          <p className="text-xs text-muted">Image, port and limits apply with the next deploy. The running container is not touched.</p>
+          <p className="text-xs text-muted">Source, port and limits apply with the next deploy. The running container is not touched.</p>
           {save.error && <ErrorNote>{save.error.message}</ErrorNote>}
           {save.isSuccess && !dirty && <p className="text-xs text-accent">Saved.</p>}
           <Button type="submit" disabled={!dirty || save.isPending}>

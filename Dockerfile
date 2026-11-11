@@ -26,7 +26,8 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/panel ./cmd/panel
 
 FROM alpine:3.22
-RUN apk add --no-cache ca-certificates tzdata
+# git fetches Git apps; the docker CLI with buildx builds them on the mounted daemon.
+RUN apk add --no-cache ca-certificates tzdata git docker-cli docker-cli-buildx
 COPY --from=build /out/panel /usr/local/bin/panel
 # The data dir defaults to /var/lib/<slug> (internal/brand); the installer mounts it.
 EXPOSE 8080

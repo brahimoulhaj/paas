@@ -3,6 +3,8 @@
 FROM golang:1.26-alpine
 
 ENV CGO_ENABLED=0 GOFLAGS=-buildvcs=false
+# git fetches Git apps; the docker CLI with buildx builds them on the mounted daemon.
+RUN apk add --no-cache git docker-cli docker-cli-buildx
 WORKDIR /src
 
 COPY go.mod go.sum ./

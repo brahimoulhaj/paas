@@ -335,3 +335,65 @@ func TestDomainsAPI(t *testing.T) {
 	}
 	e.must(201, "POST", "/api/apps/"+other+"/domains", map[string]any{"hostname": "www.shop.example.com"})
 }
+
+func TestGitAppsAPI(t *testing.T) {
+	e := newEnv(t)
+	e.signIn()
+	pid := e.must(201, "POST", "/api/projects", map[string]any{"name": "Shop"})["id"].(string)
+	apps := "/api/projects/" + pid + "/apps"
+	git := func(over map[string]any) map[string]any {
+		m := map[string]any{"name": "api", "source_type": "git", "git_repository": "https://github.com/org/api.git", "port": 8080}
+		for k, v := range over {
+			m[k] = v
+		}
+		return m
+	}
+
+	for _, bad := range []map[string]any{
+		git(map[string]any{"source_type": "svn"}),
+		git(map[string]any{"git_repository": ""}),
+		git(map[string]any{"git_repository": "http://github.com/org/api.git"}),
+		git(map[string]any{"git_repository": "git@github.com:org/api.git"}),
+		git(map[string]any{"git_repository": "file:///etc"}),
+		git(map[string]any{"git_repository": "https://user:pw@github.com/org/api.git"}),
+		git(map[string]any{"git_repository": "https://github.com/"}),
+		git(map[string]any{"git_repository": "https://github.com/org/api --upload-pack=x"}),
+		git(map[string]any{"git_branch": "-x"}),
+		git(map[string]any{"git_branch": "a..b"}),
+		git(map[string]any{"git_branch": "feature/"}),
+		git(map[string]any{"builder": "railpack"}),
+		git(map[string]any{"build_context": "../x"}),
+		git(map[string]any{"build_context": "/etc"}),
+		git(map[string]any{"dockerfile_path": "../Dockerfile"}),
+		git(map[string]any{"dockerfile_path": "."}),
+	} {
+		if code, m := e.call("POST", apps, bad); code != 422 {
+			t.Errorf("POST %v = %d %v, want 422", bad, code, m)
+		}
+	}
+
+	a := e.must(201, "POST", apps, git(map[string]any{"build_context": "./services/api/", "image": "ignored:1"}))
+	want := map[string]any{
+		"source_type": "git", "image": "", "git_repository": "https://github.com/org/api.git", "git_branch": "main",
+		"builder": "dockerfile", "build_context": "services/api", "dockerfile_path": "Dockerfile",
+	}
+	for k, v := range want {
+		if a[k] != v {
+			t.Errorf("created %s = %v, want %v", k, a[k], v)
+		}
+	}
+	id := a["id"].(string)
+
+	// Partial update keeps the rest; "." is the repository root.
+	a = e.must(200, "PATCH", "/api/apps/"+id, map[string]any{"git_branch": "release/2.0", "build_context": "."})
+	if a["git_branch"] != "release/2.0" || a["build_context"] != "" || a["git_repository"] != want["git_repository"] {
+		t.Errorf("after update = %v", a)
+	}
+
+	// Switching to an image needs an image, and clears the Git settings.
+	e.must(422, "PATCH", "/api/apps/"+id, map[string]any{"source_type": "image"})
+	a = e.must(200, "PATCH", "/api/apps/"+id, map[string]any{"source_type": "image", "image": "nginx:1.27"})
+	if a["source_type"] != "image" || a["git_repository"] != "" || a["builder"] != "" {
+		t.Errorf("after switch to image = %v", a)
+	}
+}

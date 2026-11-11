@@ -7,9 +7,9 @@ name; it lives only in `internal/brand/brand.go`.
 **How to use:** tick a box only when the item is built *and* verified (test or manual run).
 `[ ]` not started · `[~]` in progress · `[x]` done.
 
-**Progress:** M0 ◐ · M1 ◐ · M2 ☐ · M3 ☐ · M4 ☐ · M5 ☐ · M6 ☐
+**Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ☐ · M4 ☐ · M5 ☐ · M6 ☐
 
-**Next up:** on the next release, let `berth update` swap the container on the VPS; time a fresh install. Then M2. Still open in M1: the onboarding steps for S3, registry and notifications wait for their milestones.
+**Next up:** M2 — connect GitHub (create the app, install it) and GitLab for real, then deploy a private and a public Git app end to end in dev and on the VPS; then prune old build images. Time a fresh install.
 
 ---
 
@@ -132,7 +132,7 @@ Verified by API tests (with the race detector) and in a browser against a real n
 
 ### Updates
 - [x] Short-lived updater container that pulls the new image and recreates the panel — `internal/update` (registry check by semver tag or digest, helper runs `update-apply` to swap the container, result recorded as an event); registry and compose-rewrite logic unit-tested; on a real VPS the panel updated itself 0.1.x → 0.2.0 → 0.2.1 from GHCR (2026-11-11)
-- [~] `berth update` and an update button with the available version — Settings → Updates: check, update now, hourly automatic updates (wait while a deploy runs); `berth update [--check] [--yes]` built (same check and helper; refuses while a helper is already swapping); run on the VPS at 0.2.2, check reports up to date (2026-11-11); a swap through the CLI waits for the next release
+- [x] `berth update` and an update button with the available version — Settings → Updates: check, update now, hourly automatic updates (wait while a deploy runs); `berth update [--check] [--yes]` (same check and helper; refuses while a helper is already swapping); on the VPS the CLI swapped the panel to 0.2.4 (2026-11-11)
 
 ### UI
 Checked in a browser against a real deploy (create project and app, add domain, deploy, failed redeploy, stop/start, delete), desktop and phone width.
@@ -155,25 +155,25 @@ Checked in a browser against a real deploy (create project and app, add domain, 
 Goal: push-to-deploy from a repository with any of the builders.
 
 ### Git sources
-- [ ] Migration: `git_sources`, `registries`, `env_vars`
-- [ ] Public Git URL
+- [~] Migration: `git_sources`, `registries`, `env_vars` — `0003_git_source.sql` adds the Git columns to `apps` and `commit_sha` to `deployments`; `0004_git_sources.sql` adds `git_sources` (secrets encrypted) and `apps.git_source_id`; `registries` and `env_vars` come with their features
+- [~] Public Git URL — app `source_type = git` with an https repository and a branch (`/api/projects/{id}/apps`, `PATCH /api/apps/{id}`; URL, branch and path validation tested in `internal/api/apps_test.go`); create-app flow and settings offer Image or Git repository; not yet deployed end to end
 - [ ] Private repo by deploy key (generate key pair, show public key)
-- [ ] GitHub App (first provider — confirm against the open question)
-- [ ] GitLab token
+- [~] GitHub App (first provider) — created from Settings with GitHub's manifest flow (`POST /api/git-sources/github`, callback `/api/git-sources/github/callback`), read-only on code and metadata; app JWT and cached installation tokens; `internal/gitsource` tested against a fake GitHub; not yet tried against GitHub itself. Webhooks come with M3
+- [~] GitLab token — gitlab.com or self-hosted over https, token checked when added (`POST /api/git-sources/gitlab`); tested against a fake GitLab; not yet tried against GitLab itself
 - [ ] Gitea token
-- [ ] Repo and branch picker in the UI
-- [ ] Clone / fetch at a commit into a build workspace, with cleanup
+- [~] Repo and branch picker in the UI — `GET /api/git-sources/{id}/repos` and `/branches`; the app form lists the connection's repositories and the chosen one's branches; typechecked, not yet seen with a real connection
+- [~] Clone / fetch at a commit into a build workspace, with cleanup — shallow clone of the branch tip into `<data dir>/builds/<deployment>` (no credential prompt or host credential helper, https only), removed after the build and at startup; commit recorded on the deployment; a private repository is fetched with the connection's token, passed to git through the environment and scoped to the repository's host
 
 ### Builders (`internal/builder`)
-- [ ] Builder interface: source dir in, tagged local image out
+- [x] Builder interface: source dir in, tagged local image out — `internal/builder` (`Fetch`, `Build`); the deploy pipeline builds instead of pulling for Git apps (`internal/deploy`, fake builder tests)
 - [ ] Auto-detect: Dockerfile if present, otherwise Railpack
-- [ ] Dockerfile — `docker buildx build`
+- [~] Dockerfile — `docker buildx build --load` with build context and Dockerfile path checked to stay inside the repository (symlinks followed); image labelled `<slug>.build=<app id>`; checked against a real daemon in `internal/builder/builder_test.go`
 - [ ] Railpack — `railpack` CLI on BuildKit (default)
 - [ ] Nixpacks — `nixpacks build`
 - [ ] Cloud Native Buildpacks — `pack build --builder <image>` (Heroku / Paketo)
 - [ ] Static — build command, output served by a small Caddy image
-- [ ] Builder CLIs shipped in the panel image, pinned versions
-- [ ] Image tag `app-<id>:<commit-sha>`; keep the last 5, prune older
+- [~] Builder CLIs shipped in the panel image, pinned versions — `git`, `docker-cli` and `docker-cli-buildx` from Alpine in the runtime and dev images; not pinned yet
+- [~] Image tag `app-<id>:<commit-sha>`; keep the last 5, prune older — tag done; pruning not yet
 - [ ] Push to the configured registry after a build
 
 ### Jobs and queue (`internal/jobs`)
@@ -190,7 +190,7 @@ Goal: push-to-deploy from a repository with any of the builders.
 - [ ] App source: image from a private registry
 
 ### UI
-- [ ] Git sources settings
+- [~] Git sources settings — Settings → Git connections: connect GitHub, connect GitLab, remove (refused while an app uses it); seen in a browser without a connection
 - [ ] Create-app flow (Git) with builder choice
 - [ ] Build log stream on the deployment page
 - [ ] Env vars editor
@@ -363,4 +363,4 @@ Multiple servers · teams and roles beyond a single owner · Docker Compose stac
 - [ ] RustFS: stable enough, or "experimental" label
 - [ ] Database instances: internal-only by default with an opt-in public port?
 - [ ] Docker Compose stacks in v1?
-- [ ] First Git provider: GitHub App or GitLab token
+- [x] First Git provider: GitHub App or GitLab token — both: a GitHub App and a GitLab token (2026-11-11)

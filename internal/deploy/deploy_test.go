@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"panel/internal/builder"
 	"panel/internal/executor"
 	"panel/internal/executor/executortest"
 	"panel/internal/store"
@@ -383,5 +384,173 @@ func TestRecoverAndShutdown(t *testing.T) {
 	}
 	if cs := e.containers(); len(cs) != 0 {
 		t.Errorf("containers after cancelled deploy = %+v", cs)
+	}
+}
+
+// fakeBuilder "clones" by creating the workspace and "builds" by recording the tag.
+type fakeBuilder struct {
+	mu       sync.Mutex
+	commit   string
+	fetchErr error
+	buildErr error
+	auth     builder.Auth // credentials of the last fetch
+	dirs     []string     // workspaces it was given
+	tags     []string     // images it built
+}
+
+func (b *fakeBuilder) Fetch(_ context.Context, src store.GitSource, auth builder.Auth, dir string, line builder.LineFunc) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.auth = auth
+	b.dirs = append(b.dirs, dir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	line("Cloning into '" + dir + "'...")
+	if b.fetchErr != nil {
+		return "", b.fetchErr
+	}
+	return b.commit, nil
+}
+
+func (b *fakeBuilder) Build(_ context.Context, src store.GitSource, dir, tag, appID string, line builder.LineFunc) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	line("#1 [internal] load build definition from " + src.Dockerfile)
+	if b.buildErr != nil {
+		return b.buildErr
+	}
+	b.tags = append(b.tags, tag)
+	return nil
+}
+
+func (e *env) useGit(b *fakeBuilder) {
+	e.t.Helper()
+	a, err := e.st.UpdateApp(context.Background(), e.app.ID, store.AppInput{
+		Name: "web", SourceType: store.SourceGit, Port: 8080,
+		Git: store.GitSource{Repository: "https://example.com/org/web.git", Branch: "main", Builder: store.BuilderDockerfile, Dockerfile: "Dockerfile"},
+	})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	e.app = a
+	e.svc.opts.Builder = b
+}
+
+func TestDeployFromGit(t *testing.T) {
+	e := newEnv(t)
+	sha := strings.Repeat("ab12", 10)
+	b := &fakeBuilder{commit: sha}
+	e.useGit(b)
+	if e.app.Image != "" {
+		t.Fatalf("a Git app keeps no image: %+v", e.app)
+	}
+
+	dep := e.deploy()
+	wantTag := "app-" + strings.ToLower(e.app.ID) + ":" + sha
+	if dep.Status != store.DeploySucceeded || dep.CommitSHA != sha || dep.Image != wantTag || dep.Port != 8080 {
+		t.Fatalf("deployment = %+v, want succeeded with %s", dep, wantTag)
+	}
+	if len(b.tags) != 1 || b.tags[0] != wantTag {
+		t.Errorf("built %v", b.tags)
+	}
+	if cs := e.containers(); len(cs) != 1 || cs[0].Image != wantTag {
+		t.Errorf("containers = %+v", cs)
+	}
+	if _, err := os.Stat(b.dirs[0]); !os.IsNotExist(err) {
+		t.Errorf("workspace %s still there (err %v)", b.dirs[0], err)
+	}
+	raw, _ := os.ReadFile(e.svc.LogPath(dep))
+	for _, want := range []string{"from https://example.com/org/web.git (branch main)", "Commit " + sha, "| #1 [internal] load build definition", "Built image " + wantTag, "Deployment succeeded"} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("log lacks %q:\n%s", want, raw)
+		}
+	}
+	if strings.Contains(string(raw), "Pulling image") {
+		t.Errorf("a Git deploy pulled:\n%s", raw)
+	}
+}
+
+func TestDeployFromGitFailures(t *testing.T) {
+	e := newEnv(t)
+	good := e.deploy() // the image deploy that keeps serving
+	b := &fakeBuilder{commit: strings.Repeat("c", 40)}
+	e.useGit(b)
+
+	b.fetchErr = errors.New("git clone: exit status 128: fatal: repository not found")
+	dep := e.deploy()
+	if dep.Status != store.DeployFailed || !strings.Contains(dep.Error, "repository not found") || dep.CommitSHA != "" {
+		t.Errorf("fetch failure: %+v", dep)
+	}
+
+	b.fetchErr, b.buildErr = nil, errors.New("docker build: exit status 1: ERROR: failed to solve")
+	dep = e.deploy()
+	if dep.Status != store.DeployFailed || !strings.Contains(dep.Error, "failed to solve") || dep.CommitSHA == "" || dep.Image != "" {
+		t.Errorf("build failure: %+v", dep)
+	}
+	if cs := e.containers(); len(cs) != 1 || cs[0].Name != good.ContainerName {
+		t.Errorf("containers = %+v, want only the old one", cs)
+	}
+	for _, d := range b.dirs {
+		if _, err := os.Stat(d); !os.IsNotExist(err) {
+			t.Errorf("workspace %s left behind", d)
+		}
+	}
+
+	e.svc.opts.Builder = nil
+	if dep := e.deploy(); dep.Status != store.DeployFailed || !strings.Contains(dep.Error, "cannot build from Git") {
+		t.Errorf("no builder: %+v", dep)
+	}
+}
+
+type fakeGitAuth struct {
+	err   error
+	calls []string
+}
+
+func (a *fakeGitAuth) Credentials(_ context.Context, connectionID, repository string) (builder.Auth, error) {
+	a.calls = append(a.calls, connectionID+" "+repository)
+	return builder.Auth{Username: "x-access-token", Password: "s3cret-token"}, a.err
+}
+
+func TestDeployFromPrivateGit(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	b := &fakeBuilder{commit: strings.Repeat("d", 40)}
+	e.useGit(b)
+	if dep := e.deploy(); dep.Status != store.DeploySucceeded || b.auth != (builder.Auth{}) {
+		t.Fatalf("public repository: %+v, auth %+v", dep, b.auth)
+	}
+
+	// The app now uses a Git connection.
+	conn, err := e.st.CreateGitConnection(ctx, store.GitTypeGitLab, "gl", "https://example.com", "sealed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := store.AppInput{Name: "web", SourceType: store.SourceGit, Port: 8080, Git: e.app.Git}
+	in.Git.ConnectionID = conn.ID
+	if e.app, err = e.st.UpdateApp(ctx, e.app.ID, in); err != nil {
+		t.Fatal(err)
+	}
+
+	if dep := e.deploy(); dep.Status != store.DeployFailed || !strings.Contains(dep.Error, "cannot fetch private repositories") {
+		t.Errorf("no GitAuth: %+v", dep)
+	}
+
+	ga := &fakeGitAuth{}
+	e.svc.opts.GitAuth = ga
+	dep := e.deploy()
+	if dep.Status != store.DeploySucceeded || b.auth.Password != "s3cret-token" {
+		t.Fatalf("private repository: %+v, auth %+v", dep, b.auth)
+	}
+	if len(ga.calls) != 1 || ga.calls[0] != conn.ID+" https://example.com/org/web.git" {
+		t.Errorf("credentials asked for %v", ga.calls)
+	}
+	if raw, _ := os.ReadFile(e.svc.LogPath(dep)); strings.Contains(string(raw), "s3cret-token") {
+		t.Errorf("the token is in the deployment log:\n%s", raw)
+	}
+
+	ga.err = errors.New("the GitHub App is not installed on org/web")
+	if dep := e.deploy(); dep.Status != store.DeployFailed || !strings.Contains(dep.Error, "git connection: the GitHub App is not installed") {
+		t.Errorf("credentials failure: %+v", dep)
 	}
 }

@@ -1,4 +1,4 @@
-import type { App } from './api'
+import type { App, Deployment } from './api'
 
 /** "just now", "5 min ago", "3 h ago", "2 d ago", then a date. */
 export function timeAgo(iso: string | null): string {
@@ -20,6 +20,22 @@ export function duration(from: string | null, to: string | null): string {
   if (!from) return '—'
   const secs = Math.max(0, Math.round(((to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime()) / 1000))
   return secs < 60 ? `${secs} s` : `${Math.floor(secs / 60)} min ${secs % 60} s`
+}
+
+/** "github.com/org/app" from "https://github.com/org/app.git". */
+export function repoName(url: string): string {
+  return url.replace(/^https:\/\//, '').replace(/\.git$/, '').replace(/\/$/, '')
+}
+
+/** Where an app comes from, in one line: its image, or its repository and branch. */
+export function appSource(app: App): string {
+  return app.source_type === 'git' ? `${repoName(app.git_repository)} · ${app.git_branch}` : app.image
+}
+
+/** What a deployment ran: the commit for a Git app, the image otherwise. */
+export function deploymentVersion(d: Deployment): string {
+  if (d.commit_sha) return `commit ${d.commit_sha.slice(0, 7)}`
+  return d.image || '—'
 }
 
 export type Tone = 'accent' | 'muted' | 'warn' | 'danger'
@@ -65,6 +81,8 @@ const actions: Record<string, string> = {
   'panel.updated': 'updated the panel to',
   'panel.update_failed': 'could not update the panel to',
   'settings.updates': 'changed the update settings',
+  'git_source.add': 'connected the Git host',
+  'git_source.remove': 'removed the Git connection',
   'token.create': 'created the API token',
   'token.revoke': 'revoked the API token',
 }

@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams } from '@tanstack/react-router'
 import { useState, type FormEvent } from 'react'
+import { SourceFields, sourceForm, sourceInput } from '../components/source'
 import { Badge, Button, ConfirmButton, Empty, ErrorNote, Field, PageHeader, Panel, QueryState } from '../components/ui'
 import { api, appQuery, appsQuery, projectQuery, projectsQuery, type App, type Project } from '../lib/api'
-import { appStatus } from '../lib/format'
+import { appSource, appStatus } from '../lib/format'
 
 export function ProjectPage() {
   const { projectId } = useParams({ strict: false }) as { projectId: string }
@@ -37,7 +38,8 @@ export function ProjectPage() {
         {apps.data &&
           (apps.data.length === 0 ? (
             <Empty title="No apps in this project yet.">
-              An app is one container image run as one container. Add a domain to it and it is served over HTTPS.
+              An app runs one container, from a ready image or built from a Git repository. Add a domain to it and it is
+              served over HTTPS.
             </Empty>
           ) : (
             <ul className="divide-y divide-line">
@@ -75,7 +77,7 @@ function AppRow({ app }: { app: App }) {
         <span className="min-w-0">
           <span className="block truncate text-sm">{app.name}</span>
           <span className="block truncate text-xs text-muted">
-            {app.image} · port {app.port}
+            {appSource(app)} · port {app.port}
           </span>
         </span>
         <Badge tone={status.tone}>{status.label}</Badge>
@@ -88,12 +90,12 @@ function NewApp({ projectId, onDone }: { projectId: string; onDone: () => void }
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [name, setName] = useState('')
-  const [image, setImage] = useState('')
+  const [source, setSource] = useState(sourceForm())
   const [port, setPort] = useState('80')
 
   const create = useMutation({
     mutationFn: () =>
-      api<App>(`/projects/${projectId}/apps`, { method: 'POST', body: { name, image, port: Number(port) } }),
+      api<App>(`/projects/${projectId}/apps`, { method: 'POST', body: { name, port: Number(port), ...sourceInput(source) } }),
     onSuccess: (a) => {
       queryClient.invalidateQueries({ queryKey: projectsQuery.queryKey })
       navigate({ to: '/projects/$projectId/apps/$appId', params: { projectId, appId: a.id } })
@@ -108,7 +110,7 @@ function NewApp({ projectId, onDone }: { projectId: string; onDone: () => void }
   return (
     <Panel title="New app">
       <form onSubmit={submit} className="space-y-4 p-4">
-        <div className="grid gap-4 sm:grid-cols-[1fr_2fr_7rem]">
+        <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
           <Field
             label="Name"
             name="name"
@@ -120,12 +122,11 @@ function NewApp({ projectId, onDone }: { projectId: string; onDone: () => void }
             value={name}
             onChange={(e) => setName(e.target.value.toLowerCase())}
           />
-          <Field label="Image" name="image" required placeholder="nginx:1.27" value={image} onChange={(e) => setImage(e.target.value.trim())} />
-          <Field label="Port" name="port" type="number" required min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} />
+          <Field label="Container port" name="port" type="number" required min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} />
         </div>
+        <SourceFields form={source} onChange={setSource} />
         <p className="text-xs text-muted">
-          The image is pulled from a public registry. The port is the one the container listens on; it is not published on
-          the server. Nothing runs until you deploy.
+          The port is the one the container listens on; it is not published on the server. Nothing runs until you deploy.
         </p>
         {create.error && <ErrorNote>{create.error.message}</ErrorNote>}
         <div className="flex gap-2">

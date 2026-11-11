@@ -21,8 +21,9 @@ type Deployment struct {
 	AppID         string
 	Status        string
 	Trigger       string
-	Image         string
-	Port          int // the app's port when this attempt was made
+	Image         string // for a Git app: the image built, empty until the build succeeds
+	CommitSHA     string // for a Git app: the commit built, empty until it is fetched
+	Port          int    // the app's port when this attempt was made
 	ContainerID   string
 	ContainerName string
 	Error         string
@@ -33,13 +34,13 @@ type Deployment struct {
 	UpdatedAt     time.Time
 }
 
-const deploymentCols = `id, app_id, status, trigger, image, port, container_id, container_name, error, log_path,
+const deploymentCols = `id, app_id, status, trigger, image, commit_sha, port, container_id, container_name, error, log_path,
 	COALESCE(started_at, ''), COALESCE(finished_at, ''), created_at, updated_at`
 
 func scanDeployment(row scanner) (Deployment, error) {
 	var d Deployment
 	var started, finished, created, updated string
-	err := row.Scan(&d.ID, &d.AppID, &d.Status, &d.Trigger, &d.Image, &d.Port, &d.ContainerID, &d.ContainerName, &d.Error, &d.LogPath,
+	err := row.Scan(&d.ID, &d.AppID, &d.Status, &d.Trigger, &d.Image, &d.CommitSHA, &d.Port, &d.ContainerID, &d.ContainerName, &d.Error, &d.LogPath,
 		&started, &finished, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
@@ -90,6 +91,18 @@ func (s *Store) MarkDeploymentRunning(ctx context.Context, deploymentID string) 
 	ts := now()
 	return affected(s.db.ExecContext(ctx,
 		`UPDATE deployments SET status = ?, started_at = ?, updated_at = ? WHERE id = ?`, DeployRunning, ts, ts, deploymentID))
+}
+
+// SetDeploymentCommit records the commit a Git deployment is building.
+func (s *Store) SetDeploymentCommit(ctx context.Context, deploymentID, commitSHA string) error {
+	return affected(s.db.ExecContext(ctx,
+		`UPDATE deployments SET commit_sha = ?, updated_at = ? WHERE id = ?`, commitSHA, now(), deploymentID))
+}
+
+// SetDeploymentImage records the image a Git deployment built.
+func (s *Store) SetDeploymentImage(ctx context.Context, deploymentID, image string) error {
+	return affected(s.db.ExecContext(ctx,
+		`UPDATE deployments SET image = ?, updated_at = ? WHERE id = ?`, image, now(), deploymentID))
 }
 
 func (s *Store) SetDeploymentContainer(ctx context.Context, deploymentID, containerID, containerName string) error {

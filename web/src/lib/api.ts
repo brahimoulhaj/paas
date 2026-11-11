@@ -68,8 +68,19 @@ export type App = {
   id: string
   project_id: string
   name: string
-  source_type: string
+  source_type: 'image' | 'git'
+  /** Image apps only; empty for a Git app. */
   image: string
+  /** Git connection used to fetch a private repository; empty = public. */
+  git_source_id: string
+  /** Git apps only; empty for an image app. */
+  git_repository: string
+  git_branch: string
+  builder: string
+  /** Folder inside the repository; empty = its root. */
+  build_context: string
+  /** Relative to the build context. */
+  dockerfile_path: string
   port: number
   cpu_limit: number
   memory_limit_mb: number
@@ -86,7 +97,10 @@ export type Deployment = {
   app_id: string
   status: 'queued' | 'running' | 'succeeded' | 'failed'
   trigger: string
+  /** For a Git app: the image built, empty until the build succeeds. */
   image: string
+  /** For a Git app: the commit built, empty until it is fetched. */
+  commit_sha: string
   port: number
   container_name: string
   error: string
@@ -128,7 +142,19 @@ export type PanelEvent = {
   created_at: string
 }
 
-export type AppInput = { name: string; image: string; port: number; cpu_limit: number; memory_limit_mb: number }
+export type SourceInput =
+  | { source_type: 'image'; image: string }
+  | {
+      source_type: 'git'
+      git_source_id: string
+      git_repository: string
+      git_branch: string
+      builder: string
+      build_context: string
+      dockerfile_path: string
+    }
+
+export type AppInput = SourceInput & { name: string; port: number; cpu_limit: number; memory_limit_mb: number }
 
 export const isActive = (d: Deployment) => d.status === 'queued' || d.status === 'running'
 
@@ -178,6 +204,40 @@ export const panelSettingsQuery = {
 export const panelDnsQuery = (domain: string) => ({
   queryKey: ['settings', 'panel', 'dns', domain] as const,
   queryFn: () => api<DnsHint>('/settings/panel/dns'),
+})
+
+/** A connection to a Git host, for private repositories. */
+export type GitSource = {
+  id: string
+  type: 'github_app' | 'gitlab'
+  name: string
+  base_url: string
+  /** GitHub: the app's page. */
+  app_url?: string
+  /** GitHub: where accounts and repositories are chosen for the app. */
+  install_url?: string
+  created_at: string
+}
+
+export type GitRepo = { full_name: string; clone_url: string; default_branch: string; private: boolean }
+
+/** What the browser posts to GitHub to create the app. */
+export type GitHubManifest = { action_url: string; manifest: string; state: string }
+
+export const gitSourcesQuery = { queryKey: ['git-sources'] as const, queryFn: () => api<GitSource[]>('/git-sources') }
+
+export const gitReposQuery = (sourceId: string) => ({
+  queryKey: ['git-sources', sourceId, 'repos'] as const,
+  queryFn: () => api<GitRepo[]>(`/git-sources/${sourceId}/repos`),
+  staleTime: 60_000,
+  retry: false,
+})
+
+export const gitBranchesQuery = (sourceId: string, repo: string) => ({
+  queryKey: ['git-sources', sourceId, 'branches', repo] as const,
+  queryFn: () => api<string[]>(`/git-sources/${sourceId}/branches?repo=${encodeURIComponent(repo)}`),
+  staleTime: 60_000,
+  retry: false,
 })
 
 export const tokensQuery = { queryKey: ['tokens'] as const, queryFn: () => api<ApiToken[]>('/tokens') }

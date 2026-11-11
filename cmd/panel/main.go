@@ -22,9 +22,11 @@ import (
 	"panel/internal/account"
 	"panel/internal/api"
 	"panel/internal/brand"
+	"panel/internal/builder"
 	"panel/internal/config"
 	"panel/internal/deploy"
 	"panel/internal/executor"
+	"panel/internal/gitsource"
 	"panel/internal/proxy"
 	"panel/internal/secret"
 	"panel/internal/store"
@@ -204,7 +206,15 @@ func serve(ctx context.Context, cfg config.Config) error {
 		}
 	}()
 
-	deployer := deploy.New(ctx, deploy.Options{Store: st, Executor: ex, Router: px, DataDir: cfg.DataDir, Log: log})
+	box, err := secret.LoadOrCreate(cfg.KeyPath())
+	if err != nil {
+		return err
+	}
+	git := gitsource.New(st, box)
+
+	deployer := deploy.New(ctx, deploy.Options{
+		Store: st, Executor: ex, Router: px, Builder: &builder.Local{}, GitAuth: git, DataDir: cfg.DataDir, Log: log,
+	})
 	if n, err := deployer.Recover(ctx); err != nil {
 		return err
 	} else if n > 0 {
@@ -214,6 +224,7 @@ func serve(ctx context.Context, cfg config.Config) error {
 	apiSrv := api.New(st, acc, log, version, webui.FS())
 	apiSrv.SetProxy(px)
 	apiSrv.SetDeployer(deployer)
+	apiSrv.SetGitSources(git)
 	if updater := newUpdater(ctx, cfg, st, log); updater != nil {
 		updater.Detect(ctx)
 		apiSrv.SetUpdater(updater)

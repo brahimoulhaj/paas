@@ -129,19 +129,22 @@ type App struct {
 	CPULimit            float64
 	MemoryMB            int64
 	DesiredState        string
-	CurrentDeploymentID string // empty until the first successful deploy
+	CurrentDeploymentID string    // empty until the first successful deploy
+	Git                 GitSource // set when SourceType is SourceGit
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
 
 const appCols = `id, project_id, name, source_type, image, port, cpu_limit, memory_limit_mb,
-	desired_state, COALESCE(current_deployment_id, ''), created_at, updated_at`
+	desired_state, COALESCE(current_deployment_id, ''),
+	git_repository, git_branch, builder, build_context, dockerfile_path, COALESCE(git_source_id, ''), created_at, updated_at`
 
 func scanApp(row scanner) (App, error) {
 	var a App
 	var created, updated string
 	err := row.Scan(&a.ID, &a.ProjectID, &a.Name, &a.SourceType, &a.Image, &a.Port, &a.CPULimit, &a.MemoryMB,
-		&a.DesiredState, &a.CurrentDeploymentID, &created, &updated)
+		&a.DesiredState, &a.CurrentDeploymentID,
+		&a.Git.Repository, &a.Git.Branch, &a.Git.Builder, &a.Git.BuildContext, &a.Git.Dockerfile, &a.Git.ConnectionID, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -149,21 +152,56 @@ func scanApp(row scanner) (App, error) {
 	return a, err
 }
 
-// AppInput holds the fields a user can set on an app.
+// Source types of an app.
+const (
+	SourceImage = "image" // a ready image pulled from a registry
+	SourceGit   = "git"   // built from a Git repository on every deploy
+)
+
+// Builders of a Git app.
+const BuilderDockerfile = "dockerfile"
+
+// GitSource says where a Git app's code is and how it is built.
+type GitSource struct {
+	ConnectionID string // Git connection used to fetch a private repository; "" = public
+	Repository   string // https URL of the repository
+	Branch       string
+	Builder      string // BuilderDockerfile
+	BuildContext string // folder inside the repository; "" = its root
+	Dockerfile   string // path relative to the build context
+}
+
+// AppInput holds the fields a user can set on an app. Image is used by image apps and
+// Git by Git apps; the other one is stored empty.
 type AppInput struct {
-	Name     string
-	Image    string
-	Port     int
-	CPULimit float64
-	MemoryMB int64
+	Name       string
+	SourceType string
+	Image      string
+	Git        GitSource
+	Port       int
+	CPULimit   float64
+	MemoryMB   int64
+}
+
+// normalized empties the fields the source type does not use.
+func (in AppInput) normalized() AppInput {
+	if in.SourceType == SourceGit {
+		in.Image = ""
+	} else {
+		in.SourceType, in.Git = SourceImage, GitSource{}
+	}
+	return in
 }
 
 func (s *Store) CreateApp(ctx context.Context, projectID string, in AppInput) (App, error) {
+	in = in.normalized()
 	aid, ts := id.New(), now()
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO apps (id, project_id, name, source_type, image, port, cpu_limit, memory_limit_mb, desired_state, created_at, updated_at)
-		SELECT ?, id, ?, 'image', ?, ?, ?, ?, ?, ?, ? FROM projects WHERE id = ?`,
-		aid, in.Name, in.Image, in.Port, in.CPULimit, in.MemoryMB, StateStopped, ts, ts, projectID)
+		INSERT INTO apps (id, project_id, name, source_type, image, port, cpu_limit, memory_limit_mb, desired_state,
+			git_repository, git_branch, builder, build_context, dockerfile_path, git_source_id, created_at, updated_at)
+		SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ? FROM projects WHERE id = ?`,
+		aid, in.Name, in.SourceType, in.Image, in.Port, in.CPULimit, in.MemoryMB, StateStopped,
+		in.Git.Repository, in.Git.Branch, in.Git.Builder, in.Git.BuildContext, in.Git.Dockerfile, in.Git.ConnectionID, ts, ts, projectID)
 	if err != nil {
 		return App{}, conflict(err)
 	}
@@ -198,9 +236,14 @@ func (s *Store) ListApps(ctx context.Context, projectID string) ([]App, error) {
 }
 
 func (s *Store) UpdateApp(ctx context.Context, appID string, in AppInput) (App, error) {
+	in = in.normalized()
 	err := affected(s.db.ExecContext(ctx, `
-		UPDATE apps SET name = ?, image = ?, port = ?, cpu_limit = ?, memory_limit_mb = ?, updated_at = ? WHERE id = ?`,
-		in.Name, in.Image, in.Port, in.CPULimit, in.MemoryMB, now(), appID))
+		UPDATE apps SET name = ?, source_type = ?, image = ?, port = ?, cpu_limit = ?, memory_limit_mb = ?,
+			git_repository = ?, git_branch = ?, builder = ?, build_context = ?, dockerfile_path = ?,
+			git_source_id = NULLIF(?, ''), updated_at = ?
+		WHERE id = ?`,
+		in.Name, in.SourceType, in.Image, in.Port, in.CPULimit, in.MemoryMB,
+		in.Git.Repository, in.Git.Branch, in.Git.Builder, in.Git.BuildContext, in.Git.Dockerfile, in.Git.ConnectionID, now(), appID))
 	if err != nil {
 		return App{}, err
 	}
