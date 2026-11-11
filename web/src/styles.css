@@ -3,7 +3,9 @@
 /* Theme tokens. The whole look is defined here: zero radius, 1px borders, a monospace
    body, a pixel font for headings and badges only, and one accent on a dark base. */
 @theme {
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* The Arabic font comes second: JetBrains Mono draws Latin, and Arabic text falls through
+     to a font that joins its letters (the system monospace fonts do not). */
+  --font-mono: 'JetBrains Mono', 'IBM Plex Sans Arabic', ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-sans: var(--font-mono);
   --font-pixel: 'Silkscreen', var(--font-mono);
 

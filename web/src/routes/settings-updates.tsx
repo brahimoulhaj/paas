@@ -3,15 +3,17 @@ import { useEffect, useRef, useState } from 'react'
 import { Badge, Button, ErrorNote, Panel, QueryState } from '../components/ui'
 import { api, updatesQuery, type Updates } from '../lib/api'
 import { dateTime, timeAgo } from '../lib/format'
+import { rich, useT } from '../lib/i18n'
 
 /** Panel self-update: what runs, what is available, update now, automatic updates. */
 export function PanelUpdates() {
   const updates = useQuery(updatesQuery)
+  const t = useT()
   return (
-    <Panel title="Updates">
+    <Panel title={t.settingsUpdates.title}>
       {!updates.data ? (
         <div className="p-4">
-          <QueryState loading={updates.isPending} error={updates.error} what="update status" />
+          <QueryState loading={updates.isPending} error={updates.error} what={t.settingsUpdates.what} />
         </div>
       ) : (
         <UpdatesBody u={updates.data} />
@@ -22,6 +24,7 @@ export function PanelUpdates() {
 
 function UpdatesBody({ u }: { u: Updates }) {
   const queryClient = useQueryClient()
+  const t = useT()
   const set = (next: Updates) => queryClient.setQueryData(updatesQuery.queryKey, next)
   const [restarting, setRestarting] = useState<string | null>(null) // finished_at of the result before the update
 
@@ -43,10 +46,8 @@ function UpdatesBody({ u }: { u: Updates }) {
   if (!u.supported) {
     return (
       <div className="space-y-1 p-4 text-sm">
-        <p>
-          Version <span className="text-fg">{u.version}</span>
-        </p>
-        <p className="text-xs text-muted">Updates are unavailable here: {u.reason}.</p>
+        <p>{rich(t.settingsUpdates.version, { v: () => <span className="text-fg" dir="ltr">{u.version}</span> })}</p>
+        <p className="text-xs text-muted">{t.settingsUpdates.unavailable(u.reason ?? '')}</p>
       </div>
     )
   }
@@ -57,18 +58,24 @@ function UpdatesBody({ u }: { u: Updates }) {
       <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line p-4">
         <div className="min-w-0 space-y-1 text-sm">
           <p className="flex flex-wrap items-center gap-2">
-            Version <span className="text-fg">{u.version}</span>
-            {u.available ? <Badge tone="warn">update available</Badge> : u.checked_at && !u.error && <Badge tone="muted">up to date</Badge>}
+            <span>{rich(t.settingsUpdates.version, { v: () => <span className="text-fg" dir="ltr">{u.version}</span> })}</span>
+            {u.available ? (
+              <Badge tone="warn">{t.settingsUpdates.updateAvailable}</Badge>
+            ) : (
+              u.checked_at && !u.error && <Badge tone="muted">{t.settingsUpdates.upToDate}</Badge>
+            )}
           </p>
-          <p className="text-xs [overflow-wrap:anywhere] text-muted">{u.image}</p>
+          <p className="text-xs [overflow-wrap:anywhere] text-muted">
+            <bdi dir="ltr">{u.image}</bdi>
+          </p>
           <p className="text-xs text-muted" title={dateTime(u.checked_at ?? null)}>
-            {u.checked_at ? `Checked ${timeAgo(u.checked_at)}` : 'Not checked yet'}
+            {u.checked_at ? t.settingsUpdates.checked(timeAgo(u.checked_at)) : t.settingsUpdates.notChecked}
             {' · '}
-            {u.mode === 'digest' ? 'follows new pushes of this tag' : 'follows new version tags'}
+            {u.mode === 'digest' ? t.settingsUpdates.followsDigest : t.settingsUpdates.followsTags}
           </p>
         </div>
         <Button variant="ghost" type="button" disabled={busy || check.isPending} onClick={() => check.mutate()}>
-          {check.isPending || u.status === 'checking' ? 'Checking…' : 'Check now'}
+          {check.isPending || u.status === 'checking' ? t.settingsUpdates.checking : t.settingsUpdates.checkNow}
         </Button>
       </div>
 
@@ -82,14 +89,20 @@ function UpdatesBody({ u }: { u: Updates }) {
         <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line bg-raised p-4">
           <div className="min-w-0 text-sm">
             <p>
-              <span className="text-accent">{u.latest}</span> is available.
+              {rich(t.settingsUpdates.available, {
+                v: () => (
+                  <span className="text-accent" dir="ltr">
+                    {u.latest}
+                  </span>
+                ),
+              })}
             </p>
             <p className="text-xs [overflow-wrap:anywhere] text-muted">
-              Pulls {u.latest_image} and restarts the panel; apps keep running. If the new version does not start, the current one comes back.
+              {t.settingsUpdates.pullsNote(u.latest_image ?? '')}
             </p>
           </div>
           <Button type="button" disabled={busy || apply.isPending} onClick={() => apply.mutate()}>
-            {apply.isPending ? 'Pulling…' : 'Update now'}
+            {apply.isPending ? t.settingsUpdates.pulling : t.settingsUpdates.updateNow}
           </Button>
         </div>
       )}
@@ -108,8 +121,8 @@ function UpdatesBody({ u }: { u: Updates }) {
           onChange={(e) => auto.mutate(e.target.checked)}
         />
         <span>
-          Update automatically
-          <span className="block text-xs text-muted">Checked every hour. An update waits while a deployment is running.</span>
+          {t.settingsUpdates.auto}
+          <span className="block text-xs text-muted">{t.settingsUpdates.autoHint}</span>
         </span>
       </label>
       {auto.error && (
@@ -124,15 +137,14 @@ function UpdatesBody({ u }: { u: Updates }) {
 }
 
 function LastResult({ r }: { r: NonNullable<Updates['last_result']> }) {
+  const t = useT()
   return (
     <p className="border-t border-line px-4 py-3 text-xs text-muted" title={dateTime(r.finished_at)}>
-      Last update {timeAgo(r.finished_at)}:{' '}
+      {t.settingsUpdates.lastUpdate(timeAgo(r.finished_at))}{' '}
       {r.ok ? (
-        <span className="text-accent">now on {r.to}</span>
+        <span className="text-accent">{t.settingsUpdates.nowOn(r.to)}</span>
       ) : (
-        <span className="text-danger">
-          {r.to} failed and the previous version was kept — {r.error}
-        </span>
+        <span className="text-danger">{t.settingsUpdates.failedKept(r.to, r.error ?? '')}</span>
       )}
     </p>
   )
@@ -140,6 +152,7 @@ function LastResult({ r }: { r: NonNullable<Updates['last_result']> }) {
 
 /** Waits for the helper to finish (a new result appears), then reloads into the new panel. */
 function Restarting({ before, target }: { before: string; target: string }) {
+  const t = useT()
   const [seconds, setSeconds] = useState(0)
   const [result, setResult] = useState<Updates['last_result']>()
   const timer = useRef<number | undefined>(undefined)
@@ -172,11 +185,9 @@ function Restarting({ before, target }: { before: string; target: string }) {
   if (result && !result.ok) {
     return (
       <div className="space-y-2 p-4">
-        <ErrorNote>
-          The update to {result.to} failed and the previous version is running again: {result.error}
-        </ErrorNote>
+        <ErrorNote>{t.settingsUpdates.updateFailed(result.to, result.error ?? '')}</ErrorNote>
         <Button type="button" variant="ghost" onClick={() => location.reload()}>
-          Reload
+          {t.settingsUpdates.reload}
         </Button>
       </div>
     )
@@ -184,11 +195,18 @@ function Restarting({ before, target }: { before: string; target: string }) {
   return (
     <div className="space-y-1 p-4 text-sm">
       <p>
-        Updating to <span className="text-accent">{target}</span>… <span className="text-muted">{seconds}s</span>
+        {rich(t.settingsUpdates.updatingTo, {
+          v: () => (
+            <span className="text-accent" dir="ltr">
+              {target}
+            </span>
+          ),
+        })}{' '}
+        <span className="text-muted">{t.settingsUpdates.seconds(seconds)}</span>
       </p>
       <p className="text-xs text-muted">
-        The panel restarts on the new version and this page reloads by itself. Apps keep serving traffic meanwhile.
-        {seconds > 120 && ' This is taking longer than usual; check `docker logs berth-updater` on the server.'}
+        {t.settingsUpdates.restartNote}
+        {seconds > 120 && ` ${t.settingsUpdates.slowNote}`}
       </p>
     </div>
   )

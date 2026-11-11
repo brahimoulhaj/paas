@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useT } from '../lib/i18n'
 import { setTheme, themes, themeStyle, useTheme, type Theme } from '../lib/theme'
 import { cx } from './ui'
 
@@ -6,6 +7,7 @@ import { cx } from './ui'
 // card applies the theme, Escape or a click on the backdrop leaves it unchanged.
 export function ThemePicker({ brand, onClose }: { brand: string; onClose: () => void }) {
   const active = useTheme()
+  const t = useT()
   const [index, setIndex] = useState(() => Math.max(0, themes.indexOf(active)))
   const dialog = useRef<HTMLDivElement>(null)
   const n = themes.length
@@ -36,7 +38,9 @@ export function ThemePicker({ brand, onClose }: { brand: string; onClose: () => 
       ref={dialog}
       role="dialog"
       aria-modal="true"
-      aria-label="Choose a theme"
+      aria-label={t.theme.choose}
+      // The carousel is laid out by position, so it keeps one direction in every language.
+      dir="ltr"
       tabIndex={-1}
       onClick={(e) => e.target === e.currentTarget && onClose()}
       className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-black/80 backdrop-blur-sm outline-none"
@@ -44,19 +48,19 @@ export function ThemePicker({ brand, onClose }: { brand: string; onClose: () => 
       {/* perspective (without preserve-3d) gives each tilted card its depth while z-index
           still decides which card sits on top. */}
       <div className="pointer-events-none relative h-[min(28.75rem,48.75vw)] w-full [perspective:1600px]">
-        {themes.map((t, i) => {
+        {themes.map((th, i) => {
           let o = i - index
           if (o > n / 2) o -= n
           if (o < -n / 2) o += n
           const d = Math.abs(o)
           return (
             <button
-              key={t.id}
+              key={th.id}
               type="button"
               tabIndex={o === 0 ? 0 : -1}
-              aria-label={o === 0 ? `Use ${t.name}` : `Show ${t.name}`}
+              aria-label={o === 0 ? t.theme.use(th.name) : t.theme.show(th.name)}
               aria-hidden={d > 2}
-              onClick={() => (o === 0 ? choose(t) : go(o))}
+              onClick={() => (o === 0 ? choose(th) : go(o))}
               style={{
                 // Side cards turn away from the middle one, their inner edge receding behind it.
                 transform: `translate(-50%, -50%) translateX(${o * 34}%) rotateY(${-Math.sign(o) * 38}deg) scale(${o === 0 ? 1 : 0.82 - (d - 1) * 0.06})`,
@@ -69,7 +73,7 @@ export function ThemePicker({ brand, onClose }: { brand: string; onClose: () => 
                 o === 0 ? 'border-white/70' : 'border-transparent',
               )}
             >
-              <Preview theme={t} brand={brand} />
+              <Preview theme={th} brand={brand} />
             </button>
           )
         })}
@@ -78,10 +82,10 @@ export function ThemePicker({ brand, onClose }: { brand: string; onClose: () => 
       <div className="text-center text-white">
         <p className="text-2xl font-medium">{shown.name}</p>
         <p className="mt-1 text-xs text-white/60">
-          {shown.mode} · {index + 1}/{n}
-          {shown.id === active.id && ' · current'}
+          {t.theme[shown.mode]} · {index + 1}/{n}
+          {shown.id === active.id && ` · ${t.theme.current}`}
         </p>
-        <p className="mt-3 hidden text-xs text-white/40 sm:block">← → browse · Enter or click to apply · Esc to close</p>
+        <p className="mt-3 hidden text-xs text-white/40 sm:block">{t.theme.keys}</p>
       </div>
 
       <Arrow side="left" onClick={() => go(-1)} />
@@ -91,11 +95,12 @@ export function ThemePicker({ brand, onClose }: { brand: string; onClose: () => 
 }
 
 function Arrow({ side, onClick }: { side: 'left' | 'right'; onClick: () => void }) {
+  const t = useT()
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label={side === 'left' ? 'Previous theme' : 'Next theme'}
+      aria-label={side === 'left' ? t.theme.previous : t.theme.next}
       className={cx(
         'absolute top-1/2 z-20 flex size-11 -translate-y-1/2 items-center justify-center border border-white/15 bg-white/5 text-white/80 hover:bg-white/15 hover:text-white',
         side === 'left' ? 'left-3 sm:left-6' : 'right-3 sm:right-6',

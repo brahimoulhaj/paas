@@ -1,4 +1,6 @@
-import { useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes } from 'react'
+import { useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react'
+import { useT } from '../lib/i18n'
+import { LanguagePicker } from './langpicker'
 
 export function cx(...parts: (string | false | null | undefined)[]) {
   return parts.filter(Boolean).join(' ')
@@ -45,32 +47,6 @@ export function Field({ label, hint, id, className, ...props }: FieldProps) {
   )
 }
 
-type SelectFieldProps = SelectHTMLAttributes<HTMLSelectElement> & { label: string; hint?: ReactNode }
-
-/** A select that looks like Field. */
-export function SelectField({ label, hint, id, className, children, ...props }: SelectFieldProps) {
-  const selectId = id ?? props.name
-  return (
-    <div className="space-y-1.5">
-      <label htmlFor={selectId} className="block text-xs text-muted">
-        {label}
-      </label>
-      <select
-        id={selectId}
-        {...props}
-        className={cx(
-          'block h-9 w-full border border-line bg-bg px-2 text-sm text-fg',
-          'focus:border-accent focus:outline-none disabled:opacity-60',
-          className,
-        )}
-      >
-        {children}
-      </select>
-      {hint && <p className="text-xs text-muted">{hint}</p>}
-    </div>
-  )
-}
-
 export function Badge({ children, tone = 'accent' }: { children: ReactNode; tone?: 'accent' | 'muted' | 'warn' | 'danger' }) {
   return (
     <span
@@ -100,7 +76,10 @@ export function AuthCard(props: { product: string; title: string; subtitle: stri
   return (
     <main className="flex min-h-full items-center justify-center p-4">
       <div className="w-full max-w-sm">
-        <p className="mb-6 font-pixel text-xl text-accent">{props.product}</p>
+        <div className="mb-6 flex items-center justify-between">
+          <p className="font-pixel text-xl text-accent">{props.product}</p>
+          <LanguagePicker />
+        </div>
         <div className="border border-line bg-surface p-6">
           <h1 className="font-pixel text-sm uppercase">{props.title}</h1>
           <p className="mt-1 mb-6 text-xs text-muted">{props.subtitle}</p>
@@ -152,14 +131,16 @@ export function Empty(props: { title: string; children?: ReactNode }) {
 
 /** Loading and error states of a query, so pages only render the success case. */
 export function QueryState(props: { loading: boolean; error: Error | null; what: string }) {
+  const t = useT()
   if (props.error) return <ErrorNote>{props.error.message}</ErrorNote>
-  if (props.loading) return <p className="text-sm text-muted">Loading {props.what}…</p>
+  if (props.loading) return <p className="text-sm text-muted">{t.common.loading(props.what)}</p>
   return null
 }
 
 /** A destructive button that asks once more before it acts. */
 export function ConfirmButton(props: { label: string; confirm: string; onConfirm: () => void; disabled?: boolean; pending?: boolean }) {
   const [armed, setArmed] = useState(false)
+  const t = useT()
   if (!armed) {
     return (
       <Button variant="danger" type="button" disabled={props.disabled} onClick={() => setArmed(true)}>
@@ -170,10 +151,10 @@ export function ConfirmButton(props: { label: string; confirm: string; onConfirm
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
       <Button variant="danger" type="button" disabled={props.pending} onClick={props.onConfirm}>
-        {props.pending ? 'Working…' : props.confirm}
+        {props.pending ? t.common.working : props.confirm}
       </Button>
       <Button variant="ghost" type="button" disabled={props.pending} onClick={() => setArmed(false)}>
-        Cancel
+        {t.common.cancel}
       </Button>
     </span>
   )
@@ -206,12 +187,6 @@ export function CheckOption(props: {
 
 /** HTTP-only serving, for a CDN that terminates TLS itself and talks HTTP to this server. */
 export function HttpOnlyChoice({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <CheckOption
-      checked={checked}
-      onChange={onChange}
-      label="HTTP only"
-      hint="For a CDN that handles HTTPS and talks plain HTTP to this server, like Cloudflare with SSL set to Flexible. No certificate here and no redirect, which would otherwise loop. Leave off unless you need it."
-    />
-  )
+  const t = useT()
+  return <CheckOption checked={checked} onChange={onChange} label={t.common.httpOnly} hint={t.common.httpOnlyHint} />
 }

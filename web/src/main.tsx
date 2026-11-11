@@ -1,8 +1,11 @@
 import '@fontsource/jetbrains-mono/400.css'
 import '@fontsource/jetbrains-mono/500.css'
 import '@fontsource/silkscreen/400.css'
+import '@fontsource/ibm-plex-sans-arabic/arabic-400.css' // Arabic only; the Latin fonts have no Arabic letters
+import '@fontsource/ibm-plex-sans-arabic/arabic-500.css'
 import './styles.css'
 import './lib/theme' // applies the saved theme before the first render
+import './lib/i18n' // sets the saved language and its direction on <html>
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'

@@ -6,16 +6,18 @@ import { GitConnections } from './settings-git'
 import { ApiTokens } from './settings-tokens'
 import { PanelUpdates } from './settings-updates'
 import { Button, CheckOption, ConfirmButton, ErrorNote, Field, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
+import { rich, useT } from '../lib/i18n'
 import { api, ApiError, panelDnsQuery, panelSettingsQuery, type PanelSettings } from '../lib/api'
 
 export function SettingsPage() {
+  const t = useT()
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Settings"
+        title={t.common.settings}
         actions={
           <Link to="/onboarding" search={{ step: 0 }} className="text-xs text-muted hover:text-fg">
-            Setup guide →
+            {t.settings.setupGuide}
           </Link>
         }
       />
@@ -30,11 +32,12 @@ export function SettingsPage() {
 /** The panel domain section; `bare` drops the section title where the page already names it. */
 export function PanelDomain({ bare = false }: { bare?: boolean }) {
   const settings = useQuery(panelSettingsQuery)
+  const t = useT()
   return (
-    <Panel title={bare ? undefined : 'Panel domain'}>
+    <Panel title={bare ? undefined : t.settings.panelDomain}>
       {!settings.data && (
         <div className="p-4">
-          <QueryState loading={settings.isPending} error={settings.error} what="settings" />
+          <QueryState loading={settings.isPending} error={settings.error} what={t.settings.what} />
         </div>
       )}
       {settings.data && <PanelDomainForm current={settings.data} />}
@@ -44,6 +47,7 @@ export function PanelDomain({ bare = false }: { bare?: boolean }) {
 
 function PanelDomainForm({ current }: { current: PanelSettings }) {
   const queryClient = useQueryClient()
+  const t = useT()
   const [domain, setDomain] = useState(current.domain)
   const [email, setEmail] = useState(current.acme_email)
   const [httpOnly, setHttpOnly] = useState(current.tls_mode === 'http_only')
@@ -63,13 +67,12 @@ function PanelDomainForm({ current }: { current: PanelSettings }) {
     onMutate: () => setNotice(''),
     onSuccess: (s) => {
       queryClient.setQueryData(panelSettingsQuery.queryKey, s)
-      const scheme = s.tls_mode === 'http_only' ? 'http' : 'https'
       setNotice(
         !s.domain
-          ? 'Domain removed. The panel answers on the server IP again.'
+          ? t.settings.removedNotice
           : s.tls_mode === 'http_only'
-            ? `Saved. The panel is served on http://${s.domain} for your CDN to put HTTPS in front.`
-            : `Saved. The panel is served on ${scheme}://${s.domain} once its certificate is issued.`,
+            ? t.settings.savedHttpOnly(`http://${s.domain}`)
+            : t.settings.savedTls(`https://${s.domain}`),
       )
     },
     onError: (e) => {
@@ -92,33 +95,33 @@ function PanelDomainForm({ current }: { current: PanelSettings }) {
   return (
     <>
       <div className="space-y-1 border-b border-line p-4 text-sm">
-        {current.domain ? <CurrentDomain domain={current.domain} httpOnly={current.tls_mode === 'http_only'} /> : <p className="text-muted">No domain set.</p>}
+        {current.domain ? <CurrentDomain domain={current.domain} httpOnly={current.tls_mode === 'http_only'} /> : <p className="text-muted">{t.settings.noDomain}</p>}
         <p className="text-xs text-muted">
-          {current.ip_access === false
-            ? "Access by IP address is off: only the domain opens the panel."
-            : "The panel is also reachable over plain HTTP on the server's IP address."}
+          {current.ip_access === false ? t.settings.ipOff : t.settings.ipOn}
         </p>
       </div>
       <form onSubmit={submit} className="space-y-4 p-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
-            label="Domain"
+            label={t.settings.domain}
             name="panel-domain"
             placeholder="panel.example.com"
+            dir="ltr"
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
-            hint="Point an A record at this server first. A certificate is issued automatically."
+            hint={t.settings.domainHint}
             autoComplete="off"
             spellCheck={false}
           />
           <Field
-            label="Certificate email (optional)"
+            label={t.settings.certEmail}
             name="acme-email"
             type="email"
             placeholder="ops@example.com"
+            dir="ltr"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            hint="Given to Let's Encrypt for expiry notices. Used for app domains too."
+            hint={t.settings.certEmailHint}
           />
         </div>
         <div className="space-y-3">
@@ -127,20 +130,25 @@ function PanelDomainForm({ current }: { current: PanelSettings }) {
             checked={hasDomain && !ipAccess}
             disabled={!hasDomain}
             onChange={(off) => setIpAccess(!off)}
-            label="Disable access by IP address"
+            label={t.settings.disableIp}
             hint={
               <>
-                Only the domain opens the panel; requests to http://&lt;server-ip&gt; are dropped.
-                {!hasDomain && ' Needs a domain first.'}
+                {t.settings.disableIpHint}
+                {!hasDomain && ` ${t.settings.needsDomain}`}
                 {hasDomain && !ipAccess && onIP && (
                   <span className="mt-1 block text-warn">
-                    You are on the IP address now. After saving, open the domain instead; check it works first.
+                    {t.settings.onIpWarning}
                   </span>
                 )}
                 {hasDomain && !ipAccess && (
                   <span className="mt-1 block">
-                    Locked out? On the server: <code className="text-fg">ssh -L 8080:127.0.0.1:8080 root@server</code>, then open
-                    http://localhost:8080. Removing the domain turns IP access back on.
+                    {rich(t.settings.lockedOut, {
+                      cmd: () => (
+                        <code className="text-fg" dir="ltr">
+                          ssh -L 8080:127.0.0.1:8080 root@server
+                        </code>
+                      ),
+                    })}
                   </span>
                 )}
               </>
@@ -151,12 +159,12 @@ function PanelDomainForm({ current }: { current: PanelSettings }) {
         {notice && <p className="text-xs text-accent">{notice}</p>}
         <div className="flex flex-wrap items-center gap-2">
           <Button type="submit" disabled={!dirty || save.isPending}>
-            {save.isPending ? 'Saving…' : 'Save'}
+            {save.isPending ? t.common.saving : t.common.save}
           </Button>
           {current.domain && (
             <ConfirmButton
-              label="Remove domain"
-              confirm="Yes, remove"
+              label={t.settings.removeDomain}
+              confirm={t.common.yesRemove}
               pending={save.isPending}
               onConfirm={() => save.mutate({ domain: '', acme_email: current.acme_email, tls_mode: 'auto', ip_access: true })}
             />
@@ -169,15 +177,19 @@ function PanelDomainForm({ current }: { current: PanelSettings }) {
 
 function CurrentDomain({ domain, httpOnly }: { domain: string; httpOnly: boolean }) {
   const dns = useQuery(panelDnsQuery(domain))
+  const t = useT()
   const url = `${httpOnly ? 'http' : 'https'}://${domain}`
   return (
     <>
       <p>
-        Served on{' '}
-        <a href={url} target="_blank" rel="noreferrer" className="[overflow-wrap:anywhere] text-accent hover:underline">
-          {url}
-        </a>
-        {httpOnly && <span className="text-xs text-muted"> (HTTP only, HTTPS from your CDN)</span>}
+        {rich(t.settings.servedOn, {
+          url: () => (
+            <a href={url} target="_blank" rel="noreferrer" dir="ltr" className="[overflow-wrap:anywhere] text-accent hover:underline">
+              {url}
+            </a>
+          ),
+        })}
+        {httpOnly && <span className="text-xs text-muted"> {t.settings.httpOnlyNote}</span>}
       </p>
       <p className="text-xs text-muted">
         <DnsHintText dns={dns} />

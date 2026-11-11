@@ -46,11 +46,12 @@ Everything needed before the first feature: repo layout, tooling, and the shared
 ### Web app (`web/`)
 - [x] Vite + React + TypeScript + Tailwind
 - [x] TanStack Router and TanStack Query
-- [ ] ReUI / shadcn components copied into the repo
+- [~] ReUI / shadcn components copied into the repo — searchable combobox (`web/src/components/combobox.tsx`, shadcn's combobox on Base UI, the one ReUI builds on, restyled with the theme tokens); used for repository access, repository and branch; other components as they are needed
 - [x] Theme tokens: zero radius, 1 px borders, monospace body, pixel font for headings and badges, one accent on a dark base
 - [x] App shell: sidebar, sign-out, overview page with projects, empty state and recent activity
 - [x] API client with typed errors; product name read from `/api/meta`
 - [x] Dev proxy to the Go server; production build embedded with `go:embed`
+- [~] Languages: English, French, Arabic (right to left) and Spanish — typed dictionaries per screen in `web/src/i18n`, `web/src/lib/i18n.tsx` (choice kept in the browser, defaults to the browser's language), searchable language menu on the globe button of the navbar and on the sign-in screens; messages written by the server (API errors, deployment logs) stay in English
 
 ---
 
@@ -350,7 +351,7 @@ Goal: see what the server is doing and get told when something breaks.
 - [ ] Security review: socket exposure, secrets at rest, webhook token handling, headers
 - [ ] Panel self-backup (SQLite file + key) and restore procedure
 - [ ] Docs: install, first deploy, backups, updates, recovery CLI
-- [x] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog — push a `vX.Y.Z` tag; `.github/workflows/release.yml` publishes `ghcr.io/brahimoulhaj/paas:X.Y.Z` and `:latest` and a GitHub release with generated notes (v0.1.0 → v0.3.0 published)
+- [x] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog — push a `vX.Y.Z` tag; `.github/workflows/release.yml` publishes `ghcr.io/brahimoulhaj/paas:X.Y.Z` and `:latest` and a GitHub release with generated notes (v0.1.0 → v0.3.1 published)
 
 ## Out of v1
 

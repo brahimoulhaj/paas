@@ -5,18 +5,20 @@ import { SourceFields, sourceForm, sourceInput } from '../components/source'
 import { Badge, Button, ConfirmButton, Empty, ErrorNote, Field, PageHeader, Panel, QueryState } from '../components/ui'
 import { api, appQuery, appsQuery, projectQuery, projectsQuery, type App, type Project } from '../lib/api'
 import { appSource, appStatus } from '../lib/format'
+import { useT } from '../lib/i18n'
 
 export function ProjectPage() {
   const { projectId } = useParams({ strict: false }) as { projectId: string }
   const project = useQuery(projectQuery(projectId))
   const apps = useQuery(appsQuery(projectId))
   const [adding, setAdding] = useState(false)
+  const t = useT()
 
   if (!project.data) {
     return (
       <div className="space-y-4">
         <Crumbs />
-        <QueryState loading={project.isPending} error={project.error} what="project" />
+        <QueryState loading={project.isPending} error={project.error} what={t.project.what} />
       </div>
     )
   }
@@ -28,19 +30,16 @@ export function ProjectPage() {
         crumbs={<Crumbs />}
         title={p.name}
         subtitle={p.description || undefined}
-        actions={!adding && <Button onClick={() => setAdding(true)}>New app</Button>}
+        actions={!adding && <Button onClick={() => setAdding(true)}>{t.project.newApp}</Button>}
       />
 
       {adding && <NewApp projectId={p.id} onDone={() => setAdding(false)} />}
 
-      <Panel title="Apps">
-        <QueryState loading={apps.isPending} error={apps.error} what="apps" />
+      <Panel title={t.project.apps}>
+        <QueryState loading={apps.isPending} error={apps.error} what={t.project.appsWhat} />
         {apps.data &&
           (apps.data.length === 0 ? (
-            <Empty title="No apps in this project yet.">
-              An app runs one container, from a ready image or built from a Git repository. Add a domain to it and it is
-              served over HTTPS.
-            </Empty>
+            <Empty title={t.project.emptyTitle}>{t.project.emptyHint}</Empty>
           ) : (
             <ul className="divide-y divide-line">
               {apps.data.map((a) => (
@@ -56,9 +55,10 @@ export function ProjectPage() {
 }
 
 function Crumbs() {
+  const t = useT()
   return (
     <Link to="/projects" className="hover:text-fg">
-      ← Projects
+      {t.project.back}
     </Link>
   )
 }
@@ -66,6 +66,7 @@ function Crumbs() {
 /** One app in the list. It asks for the app on its own to learn what the container is doing. */
 function AppRow({ app }: { app: App }) {
   const live = useQuery({ ...appQuery(app.id), refetchInterval: 10_000 })
+  const t = useT()
   const status = appStatus(live.data ?? app, false)
   return (
     <li>
@@ -77,7 +78,7 @@ function AppRow({ app }: { app: App }) {
         <span className="min-w-0">
           <span className="block truncate text-sm">{app.name}</span>
           <span className="block truncate text-xs text-muted">
-            {appSource(app)} · port {app.port}
+            <span dir="ltr">{appSource(app)}</span> · {t.project.port(app.port)}
           </span>
         </span>
         <Badge tone={status.tone}>{status.label}</Badge>
@@ -92,6 +93,7 @@ function NewApp({ projectId, onDone }: { projectId: string; onDone: () => void }
   const [name, setName] = useState('')
   const [source, setSource] = useState(sourceForm())
   const [port, setPort] = useState('80')
+  const t = useT()
 
   const create = useMutation({
     mutationFn: () =>
@@ -108,33 +110,32 @@ function NewApp({ projectId, onDone }: { projectId: string; onDone: () => void }
   }
 
   return (
-    <Panel title="New app">
+    <Panel title={t.project.newApp}>
       <form onSubmit={submit} className="space-y-4 p-4">
         <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
           <Field
-            label="Name"
+            label={t.common.name}
             name="name"
             required
             autoFocus
+            dir="ltr"
             placeholder="web"
             pattern="[a-z0-9]([a-z0-9\-]{0,38}[a-z0-9])?"
-            title="Lowercase letters, digits and dashes"
+            title={t.project.nameTitle}
             value={name}
             onChange={(e) => setName(e.target.value.toLowerCase())}
           />
-          <Field label="Container port" name="port" type="number" required min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} />
+          <Field label={t.project.containerPort} name="port" type="number" required min={1} max={65535} value={port} onChange={(e) => setPort(e.target.value)} />
         </div>
         <SourceFields form={source} onChange={setSource} />
-        <p className="text-xs text-muted">
-          The port is the one the container listens on; it is not published on the server. Nothing runs until you deploy.
-        </p>
+        <p className="text-xs text-muted">{t.project.portHint}</p>
         {create.error && <ErrorNote>{create.error.message}</ErrorNote>}
         <div className="flex gap-2">
           <Button type="submit" disabled={create.isPending}>
-            {create.isPending ? 'Creating…' : 'Create app'}
+            {create.isPending ? t.common.creating : t.project.createApp}
           </Button>
           <Button type="button" variant="ghost" onClick={onDone}>
-            Cancel
+            {t.common.cancel}
           </Button>
         </div>
       </form>
@@ -148,6 +149,7 @@ function ProjectSettings({ project }: { project: Project }) {
   const [name, setName] = useState(project.name)
   const [description, setDescription] = useState(project.description)
   const dirty = name !== project.name || description !== project.description
+  const t = useT()
 
   const save = useMutation({
     mutationFn: () => api<Project>(`/projects/${project.id}`, { method: 'PATCH', body: { name, description } }),
@@ -171,24 +173,24 @@ function ProjectSettings({ project }: { project: Project }) {
   }
 
   return (
-    <Panel title="Project settings">
+    <Panel title={t.project.settingsTitle}>
       <form onSubmit={submit} className="space-y-4 p-4">
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Name" name="project-name" required maxLength={64} value={name} onChange={(e) => setName(e.target.value)} />
-          <Field label="Description" name="project-description" maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
+          <Field label={t.common.name} name="project-name" required maxLength={64} value={name} onChange={(e) => setName(e.target.value)} />
+          <Field label={t.common.description} name="project-description" maxLength={500} value={description} onChange={(e) => setDescription(e.target.value)} />
         </div>
         {save.error && <ErrorNote>{save.error.message}</ErrorNote>}
         <Button type="submit" variant="ghost" disabled={!dirty || save.isPending}>
-          {save.isPending ? 'Saving…' : 'Save'}
+          {save.isPending ? t.common.saving : t.common.save}
         </Button>
       </form>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line p-4">
         <p className="text-xs text-muted">
-          {project.app_count > 0 ? 'Delete the apps in this project before deleting it.' : 'Deleting a project cannot be undone.'}
+          {project.app_count > 0 ? t.project.deleteBlocked : t.project.deleteWarning}
         </p>
         <ConfirmButton
-          label="Delete project"
-          confirm="Yes, delete it"
+          label={t.project.deleteProject}
+          confirm={t.common.yesDelete}
           disabled={project.app_count > 0}
           pending={remove.isPending}
           onConfirm={() => remove.mutate()}

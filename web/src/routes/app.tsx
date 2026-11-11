@@ -19,12 +19,14 @@ import {
   type Domain,
 } from '../lib/api'
 import { SourceFields, sourceChanged, sourceForm, sourceInput } from '../components/source'
+import { rich, useT } from '../lib/i18n'
 import { appSource, appStatus, dateTime, deploymentVersion, duration, repoName, timeAgo, type Tone } from '../lib/format'
 
 export const appTabs = ['overview', 'deployments', 'logs', 'domains', 'settings'] as const
 export type AppTab = (typeof appTabs)[number]
 
 export function AppPage() {
+  const t = useT()
   const { projectId, appId } = useParams({ strict: false }) as { projectId: string; appId: string }
   const tab = (useSearch({ strict: false }) as { tab?: AppTab }).tab ?? 'overview'
   const queryClient = useQueryClient()
@@ -64,7 +66,7 @@ export function AppPage() {
 
   const crumbs = (
     <Link to="/projects/$projectId" params={{ projectId }} className="hover:text-fg">
-      ← {project.data?.name ?? 'Project'}
+      {t.app.back(project.data?.name ?? t.app.project)}
     </Link>
   )
 
@@ -72,7 +74,7 @@ export function AppPage() {
     return (
       <div className="space-y-4">
         <p className="text-xs text-muted">{crumbs}</p>
-        <QueryState loading={app.isPending} error={app.error} what="app" />
+        <QueryState loading={app.isPending} error={app.error} what={t.app.whatApp} />
       </div>
     )
   }
@@ -97,20 +99,20 @@ export function AppPage() {
             {deployed && a.desired_state === 'running' && (
               <>
                 <Button variant="ghost" disabled={busy} onClick={() => action.mutate('restart')}>
-                  Restart
+                  {t.app.restart}
                 </Button>
                 <Button variant="ghost" disabled={busy} onClick={() => action.mutate('stop')}>
-                  Stop
+                  {t.app.stop}
                 </Button>
               </>
             )}
             {deployed && a.desired_state === 'stopped' && (
               <Button variant="ghost" disabled={busy} onClick={() => action.mutate('start')}>
-                Start
+                {t.app.start}
               </Button>
             )}
             <Button disabled={busy} onClick={() => deploy.mutate()}>
-              {deploying ? 'Deploying…' : deployed ? 'Redeploy' : 'Deploy'}
+              {deploying ? t.app.deploying : deployed ? t.app.redeploy : t.app.deploy}
             </Button>
           </>
         }
@@ -118,20 +120,20 @@ export function AppPage() {
 
       {actionError && <ErrorNote>{actionError.message}</ErrorNote>}
 
-      <nav className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-line" aria-label="App sections">
-        {appTabs.map((t) => (
+      <nav className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-line" aria-label={t.app.sections}>
+        {appTabs.map((name) => (
           <Link
-            key={t}
+            key={name}
             to="/projects/$projectId/apps/$appId"
             params={{ projectId, appId }}
-            search={{ tab: t }}
+            search={{ tab: name }}
             className={cx(
               'border-b-2 px-3 py-1.5 text-sm whitespace-nowrap capitalize',
-              t === tab ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg',
+              name === tab ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg',
             )}
-            aria-current={t === tab ? 'page' : undefined}
+            aria-current={name === tab ? 'page' : undefined}
           >
-            {t}
+            {t.app.tabs[name]}
           </Link>
         ))}
       </nav>
@@ -157,6 +159,7 @@ export function AppPage() {
 // ---- overview ----
 
 function Overview({ app, latest, onOpenDeployments }: { app: App; latest?: Deployment; onOpenDeployments: () => void }) {
+  const t = useT()
   const domains = useQuery(domainsQuery(app.id))
   const deployments = useQuery(deploymentsQuery(app.id))
   const current = deployments.data?.find((d) => d.id === app.current_deployment_id)
@@ -167,77 +170,93 @@ function Overview({ app, latest, onOpenDeployments }: { app: App; latest?: Deplo
     <div className="space-y-6">
       {!app.current_deployment_id && !(latest && isActive(latest)) && (
         <Panel>
-          <Empty title="This app has never been deployed.">
-            {app.source_type === 'git' ? (
-              <>
-                Press Deploy to fetch <span className="text-fg">{repoName(app.git_repository)}</span> at{' '}
-                <span className="text-fg">{app.git_branch}</span>, build it and start it.
-              </>
-            ) : (
-              <>
-                Press Deploy to pull <span className="text-fg">{app.image}</span> and start it.
-              </>
-            )}
-            {latest?.status === 'failed' && ' The last attempt failed; its log is under Deployments.'}
+          <Empty title={t.app.neverDeployed}>
+            {app.source_type === 'git'
+              ? rich(t.app.pressDeployGit, {
+                  repo: () => (
+                    <span className="text-fg" dir="ltr">
+                      {repoName(app.git_repository)}
+                    </span>
+                  ),
+                  branch: () => (
+                    <span className="text-fg" dir="ltr">
+                      {app.git_branch}
+                    </span>
+                  ),
+                })
+              : rich(t.app.pressDeployImage, {
+                  image: () => (
+                    <span className="text-fg" dir="ltr">
+                      {app.image}
+                    </span>
+                  ),
+                })}
+            {latest?.status === 'failed' && ` ${t.app.lastAttemptFailed}`}
           </Empty>
         </Panel>
       )}
       {pending && (
         <p className="border border-warn/60 px-3 py-2 text-xs text-warn">
-          Settings changed since the last deploy (deployed: {deploymentVersion(current)}, port {current.port}). Redeploy to
-          apply them.
+          {t.app.settingsChanged(deploymentVersion(current), current.port)}
         </p>
       )}
       {latest?.status === 'failed' && app.current_deployment_id && (
         <p className="border border-danger/60 px-3 py-2 text-xs text-danger">
-          The last deploy failed: {latest.error}.{' '}
-          <button className="underline" onClick={onOpenDeployments}>
-            Open its log
-          </button>
-          . The previous version was kept.
+          {rich(t.app.deployFailed, {
+            err: () => latest.error,
+            a: (c) => (
+              <button className="underline" onClick={onOpenDeployments}>
+                {c}
+              </button>
+            ),
+          })}
         </p>
       )}
-      <Panel title="Summary">
+      <Panel title={t.app.summary}>
         <dl className="grid gap-px bg-line sm:grid-cols-2">
           {app.source_type === 'git' ? (
             <>
-              <Fact label="Repository">
-                <a href={app.git_repository} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+              <Fact label={t.app.repository}>
+                <a href={app.git_repository} target="_blank" rel="noreferrer" className="text-accent hover:underline" dir="ltr">
                   {repoName(app.git_repository)}
                 </a>{' '}
-                · {app.git_branch}
+                · <span dir="ltr">{app.git_branch}</span>
               </Fact>
-              <Fact label="Dockerfile">{[app.build_context, app.dockerfile_path].filter(Boolean).join('/')}</Fact>
+              <Fact label="Dockerfile">
+                <span dir="ltr">{[app.build_context, app.dockerfile_path].filter(Boolean).join('/')}</span>
+              </Fact>
             </>
           ) : (
-            <Fact label="Image">{app.image}</Fact>
+            <Fact label={t.app.image}>
+              <span dir="ltr">{app.image}</span>
+            </Fact>
           )}
-          <Fact label="Container port">{app.port}</Fact>
-          <Fact label="Limits">
-            {app.cpu_limit > 0 ? `${app.cpu_limit} CPU` : 'CPU unlimited'} ·{' '}
-            {app.memory_limit_mb > 0 ? `${app.memory_limit_mb} MB` : 'memory unlimited'}
+          <Fact label={t.app.containerPort}>{app.port}</Fact>
+          <Fact label={t.app.limits}>
+            {app.cpu_limit > 0 ? t.app.cpuValue(app.cpu_limit) : t.app.cpuUnlimited} ·{' '}
+            {app.memory_limit_mb > 0 ? t.app.memoryValue(app.memory_limit_mb) : t.app.memoryUnlimited}
           </Fact>
-          <Fact label="Container">{app.runtime_state === 'none' ? '—' : app.runtime_state}</Fact>
-          <Fact label="Running version">
+          <Fact label={t.app.container}>{app.runtime_state === 'none' ? '—' : app.runtime_state}</Fact>
+          <Fact label={t.app.runningVersion}>
             {current ? (
               <span title={dateTime(current.finished_at)}>
-                {deploymentVersion(current)} · deployed {timeAgo(current.finished_at)}
+                {t.app.deployedAgo(deploymentVersion(current), timeAgo(current.finished_at))}
               </span>
             ) : (
               '—'
             )}
           </Fact>
-          <Fact label="Domains">
+          <Fact label={t.app.tabs.domains}>
             {domains.data?.length ? (
-              <span className="flex flex-col">
+              <span className="flex flex-col items-start">
                 {domains.data.map((d) => (
-                  <a key={d.id} href={`https://${d.hostname}`} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                  <a key={d.id} href={`https://${d.hostname}`} target="_blank" rel="noreferrer" className="text-accent hover:underline" dir="ltr">
                     {d.hostname}
                   </a>
                 ))}
               </span>
             ) : (
-              <span className="text-muted">None. Without a domain the app is not reachable from outside.</span>
+              <span className="text-muted">{t.app.noDomains}</span>
             )}
           </Fact>
         </dl>
@@ -272,14 +291,15 @@ function Deployments(props: {
   selected: string | null
   onSelect: (id: string) => void
 }) {
+  const t = useT()
   const selected = props.list?.find((d) => d.id === props.selected)
   return (
     <div className="space-y-6">
-      <Panel title="Deployments">
-        <QueryState loading={props.loading} error={props.error} what="deployments" />
+      <Panel title={t.app.tabs.deployments}>
+        <QueryState loading={props.loading} error={props.error} what={t.app.whatDeployments} />
         {props.list &&
           (props.list.length === 0 ? (
-            <Empty title="No deployments yet.">Each deploy is recorded here with its log.</Empty>
+            <Empty title={t.app.noDeployments}>{t.app.noDeploymentsHint}</Empty>
           ) : (
             <ul className="divide-y divide-line">
               {props.list.map((d) => (
@@ -289,19 +309,19 @@ function Deployments(props: {
                     onClick={() => props.onSelect(d.id)}
                     aria-pressed={d.id === props.selected}
                     className={cx(
-                      'flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-left hover:bg-raised',
+                      'flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-start hover:bg-raised',
                       d.id === props.selected && 'bg-raised',
                     )}
                   >
                     <span className="w-24 shrink-0">
-                      <Badge tone={deployTone[d.status]}>{d.status}</Badge>
+                      <Badge tone={deployTone[d.status]}>{t.app.deployStatus[d.status]}</Badge>
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm">
                       {deploymentVersion(d)}
-                      {d.id === props.currentId && <span className="ml-2 text-xs text-accent">live</span>}
+                      {d.id === props.currentId && <span className="ms-2 text-xs text-accent">{t.app.live}</span>}
                     </span>
                     <span className="w-full shrink-0 text-xs text-muted sm:w-auto" title={dateTime(d.created_at)}>
-                      {timeAgo(d.created_at)} · took {duration(d.started_at, isActive(d) ? null : d.finished_at)}
+                      {t.app.took(timeAgo(d.created_at), duration(d.started_at, isActive(d) ? null : d.finished_at))}
                     </span>
                   </button>
                 </li>
@@ -315,10 +335,11 @@ function Deployments(props: {
 }
 
 function DeploymentLog({ deployment }: { deployment: Deployment }) {
+  const t = useT()
   return (
     <Panel
-      title={`Log · ${dateTime(deployment.created_at)}`}
-      actions={<Badge tone={deployTone[deployment.status]}>{deployment.status}</Badge>}
+      title={t.app.logTitle(dateTime(deployment.created_at))}
+      actions={<Badge tone={deployTone[deployment.status]}>{t.app.deployStatus[deployment.status]}</Badge>}
     >
       {deployment.error && <p className="border-b border-line px-4 py-2 text-xs text-danger">{deployment.error}</p>}
       {/* The key reopens the stream when another deployment is selected. */}
@@ -330,21 +351,22 @@ function DeploymentLog({ deployment }: { deployment: Deployment }) {
 // ---- runtime logs ----
 
 function RuntimeLogs({ app }: { app: App }) {
+  const t = useT()
   if (!app.current_deployment_id) {
     return (
       <Panel>
-        <Empty title="No container yet.">Logs appear here once the app has been deployed.</Empty>
+        <Empty title={t.app.noContainer}>{t.app.noContainerHint}</Empty>
       </Panel>
     )
   }
   // A new deployment, or a stopped container starting again, is a new stream.
   const run = `${app.current_deployment_id}:${app.runtime_state === 'running'}`
   return (
-    <Panel title="Container output">
+    <Panel title={t.app.containerOutput}>
       <LogViewer
         key={run}
         url={`/api/apps/${app.id}/logs/stream?tail=500`}
-        refused="The container is gone. Redeploy the app."
+        refused={t.app.containerGone}
       />
     </Panel>
   )
@@ -353,6 +375,7 @@ function RuntimeLogs({ app }: { app: App }) {
 // ---- domains ----
 
 function Domains({ app }: { app: App }) {
+  const t = useT()
   const queryClient = useQueryClient()
   const domains = useQuery(domainsQuery(app.id))
   const [hostname, setHostname] = useState('')
@@ -376,13 +399,11 @@ function Domains({ app }: { app: App }) {
 
   return (
     <div className="space-y-6">
-      <Panel title="Domains">
-        <QueryState loading={domains.isPending} error={domains.error} what="domains" />
+      <Panel title={t.app.tabs.domains}>
+        <QueryState loading={domains.isPending} error={domains.error} what={t.app.whatDomains} />
         {domains.data &&
           (domains.data.length === 0 ? (
-            <Empty title="No domains yet.">
-              Add a hostname and point its DNS record at this server. The certificate is issued automatically.
-            </Empty>
+            <Empty title={t.app.noDomainsYet}>{t.app.noDomainsYetHint}</Empty>
           ) : (
             <ul className="divide-y divide-line">
               {domains.data.map((d) => (
@@ -391,21 +412,22 @@ function Domains({ app }: { app: App }) {
             </ul>
           ))}
       </Panel>
-      <Panel title="Add a domain">
+      <Panel title={t.app.addDomainTitle}>
         <form onSubmit={submit} className="space-y-4 p-4">
           <Field
-            label="Hostname"
+            label={t.app.hostname}
             name="hostname"
             required
             placeholder="app.example.com"
-            hint={httpOnly ? 'No scheme, port or path. Served over plain HTTP, without a certificate.' : 'No scheme, port or path. Plain HTTP requests are redirected to HTTPS.'}
+            dir="ltr"
+            hint={httpOnly ? t.app.hostnameHintHttp : t.app.hostnameHintHttps}
             value={hostname}
             onChange={(e) => setHostname(e.target.value.trim().toLowerCase())}
           />
           <HttpOnlyChoice checked={httpOnly} onChange={setHttpOnly} />
           {add.error && <ErrorNote>{add.error.message}</ErrorNote>}
           <Button type="submit" disabled={add.isPending}>
-            {add.isPending ? 'Adding…' : 'Add domain'}
+            {add.isPending ? t.app.adding : t.app.addDomain}
           </Button>
         </form>
       </Panel>
@@ -414,6 +436,7 @@ function Domains({ app }: { app: App }) {
 }
 
 function DomainRow({ domain, onRemoved }: { domain: Domain; onRemoved: () => void }) {
+  const t = useT()
   const dns = useQuery(dnsQuery(domain.id))
   const remove = useMutation({
     mutationFn: () => api<void>(`/domains/${domain.id}`, { method: 'DELETE' }),
@@ -429,10 +452,10 @@ function DomainRow({ domain, onRemoved }: { domain: Domain; onRemoved: () => voi
     <li className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3">
       <div className="min-w-0">
         <p className="flex flex-wrap items-center gap-2">
-          <a href={`https://${domain.hostname}`} target="_blank" rel="noreferrer" className="text-sm [overflow-wrap:anywhere] text-accent hover:underline">
+          <a href={`https://${domain.hostname}`} target="_blank" rel="noreferrer" className="text-sm [overflow-wrap:anywhere] text-accent hover:underline" dir="ltr">
             {domain.hostname}
           </a>
-          {httpOnly && <Badge tone="muted">http only</Badge>}
+          {httpOnly && <Badge tone="muted">{t.common.httpOnly}</Badge>}
         </p>
         <p className="text-xs text-muted">
           <DnsHintText dns={dns} />
@@ -445,12 +468,12 @@ function DomainRow({ domain, onRemoved }: { domain: Domain; onRemoved: () => voi
           variant="ghost"
           type="button"
           disabled={setMode.isPending}
-          title={httpOnly ? 'Get a certificate here and redirect HTTP to HTTPS' : 'Serve over plain HTTP, for a CDN that handles HTTPS'}
+          title={httpOnly ? t.app.toHttpsTitle : t.app.toHttpTitle}
           onClick={() => setMode.mutate(httpOnly ? 'auto' : 'http_only')}
         >
-          {setMode.isPending ? 'Saving…' : httpOnly ? 'Use HTTPS' : 'HTTP only'}
+          {setMode.isPending ? t.common.saving : httpOnly ? t.app.useHttps : t.common.httpOnly}
         </Button>
-        <ConfirmButton label="Remove" confirm="Yes, remove" pending={remove.isPending} onConfirm={() => remove.mutate()} />
+        <ConfirmButton label={t.common.remove} confirm={t.common.yesRemove} pending={remove.isPending} onConfirm={() => remove.mutate()} />
       </span>
     </li>
   )
@@ -459,6 +482,7 @@ function DomainRow({ domain, onRemoved }: { domain: Domain; onRemoved: () => voi
 // ---- settings ----
 
 function Settings({ app }: { app: App }) {
+  const t = useT()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [source, setSource] = useState(sourceForm(app))
@@ -506,38 +530,38 @@ function Settings({ app }: { app: App }) {
 
   return (
     <div className="space-y-6">
-      <Panel title="Settings">
+      <Panel title={t.app.tabs.settings}>
         <form onSubmit={submit} className="space-y-4 p-4">
           <Field
-            label="Name"
+            label={t.common.name}
             name="name"
             required
             pattern="[a-z0-9]([a-z0-9\-]{0,38}[a-z0-9])?"
-            title="Lowercase letters, digits and dashes"
+            title={t.app.nameRule}
+            dir="ltr"
             value={form.name}
             onChange={set('name')}
           />
           <SourceFields form={source} onChange={setSource} />
           <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Container port" name="port" type="number" required min={1} max={65535} value={form.port} onChange={set('port')} />
-            <Field label="CPU limit (cores)" name="cpu" type="number" min={0} max={256} step="0.05" hint="0 = unlimited" value={form.cpu} onChange={set('cpu')} />
-            <Field label="Memory limit (MB)" name="memory" type="number" min={0} step="1" hint="0 = unlimited" value={form.memory} onChange={set('memory')} />
+            <Field label={t.app.containerPort} name="port" dir="ltr" type="number" required min={1} max={65535} value={form.port} onChange={set('port')} />
+            <Field label={t.app.cpuLimit} name="cpu" dir="ltr" type="number" min={0} max={256} step="0.05" hint={t.app.zeroUnlimited} value={form.cpu} onChange={set('cpu')} />
+            <Field label={t.app.memoryLimit} name="memory" dir="ltr" type="number" min={0} step="1" hint={t.app.zeroUnlimited} value={form.memory} onChange={set('memory')} />
           </div>
-          <p className="text-xs text-muted">Source, port and limits apply with the next deploy. The running container is not touched.</p>
+          <p className="text-xs text-muted">{t.app.appliesNextDeploy}</p>
           {save.error && <ErrorNote>{save.error.message}</ErrorNote>}
-          {save.isSuccess && !dirty && <p className="text-xs text-accent">Saved.</p>}
+          {save.isSuccess && !dirty && <p className="text-xs text-accent">{t.common.saved}</p>}
           <Button type="submit" disabled={!dirty || save.isPending}>
-            {save.isPending ? 'Saving…' : 'Save settings'}
+            {save.isPending ? t.common.saving : t.app.saveSettings}
           </Button>
         </form>
       </Panel>
-      <Panel title="Delete app">
+      <Panel title={t.app.deleteApp}>
         <div className="flex flex-wrap items-center justify-between gap-3 p-4">
           <p className="max-w-md text-xs text-muted">
-            Stops and removes the container, the domains, and every deployment record and log of this app. This cannot be
-            undone.
+            {t.app.deleteAppHint}
           </p>
-          <ConfirmButton label="Delete app" confirm="Yes, delete it" pending={remove.isPending} onConfirm={() => remove.mutate()} />
+          <ConfirmButton label={t.app.deleteApp} confirm={t.common.yesDelete} pending={remove.isPending} onConfirm={() => remove.mutate()} />
         </div>
         {remove.error && (
           <div className="px-4 pb-4">

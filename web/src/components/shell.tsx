@@ -2,19 +2,22 @@ import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tansta
 import { Link, Outlet, useLocation, useNavigate } from '@tanstack/react-router'
 import { useEffect, useRef, useState } from 'react'
 import { api, meQuery, metaQuery, updatesQuery, type User } from '../lib/api'
+import { useT } from '../lib/i18n'
 import { useTheme } from '../lib/theme'
+import { LanguagePicker } from './langpicker'
 import { ThemePicker } from './themepicker'
 import { Badge, cx } from './ui'
 
 // Sections light up as their milestone lands; until then they show as "soon".
-const nav = [
-  { label: 'Overview', to: '/' as const, exact: true },
-  { label: 'Projects', to: '/projects' as const },
-  { label: 'Activity', to: '/activity' as const },
-  { label: 'Databases' },
-  { label: 'Storage' },
-  { label: 'Registry' },
-  { label: 'Settings', to: '/settings' as const },
+type NavKey = 'overview' | 'projects' | 'activity' | 'databases' | 'storage' | 'registry' | 'settings'
+const nav: { key: NavKey; to?: '/' | '/projects' | '/activity' | '/settings'; exact?: boolean }[] = [
+  { key: 'overview', to: '/', exact: true },
+  { key: 'projects', to: '/projects' },
+  { key: 'activity', to: '/activity' },
+  { key: 'databases' },
+  { key: 'storage' },
+  { key: 'registry' },
+  { key: 'settings', to: '/settings' },
 ]
 
 // The page itself never scrolls: the navbar and the sidebar stay put and only <main> scrolls.
@@ -25,6 +28,8 @@ export function Shell() {
   const main = useRef<HTMLElement>(null)
   const { pathname } = useLocation()
   const [picking, setPicking] = useState(false)
+  const t = useT()
+  const label = (key: NavKey) => (key === 'settings' ? t.common.settings : t.shell[key])
 
   // The router restores window scroll, which no longer moves; a new page starts at the top.
   useEffect(() => {
@@ -34,13 +39,13 @@ export function Shell() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-line bg-surface">
-        <div className="flex h-full items-center gap-3 px-4 md:w-56 md:justify-between md:border-r md:border-line">
+        <div className="flex h-full items-center gap-3 px-4 md:w-56 md:justify-between md:border-e md:border-line">
           <Link to="/" className="font-pixel text-lg text-accent">
             {meta.name}
           </Link>
           {updates.data?.available ? (
-            <Link to="/settings" title={`${updates.data.latest} is available`}>
-              <Badge tone="warn">update</Badge>
+            <Link to="/settings" title={t.shell.updateAvailable(updates.data.latest ?? '')}>
+              <Badge tone="warn">{t.shell.update}</Badge>
             </Link>
           ) : (
             <span className="text-[10px] text-muted">{meta.version}</span>
@@ -50,37 +55,38 @@ export function Shell() {
           <button
             type="button"
             onClick={() => setPicking(true)}
-            aria-label="Choose a theme"
-            title="Theme"
+            aria-label={t.shell.chooseTheme}
+            title={t.shell.theme}
             className="flex size-8 items-center justify-center border border-transparent text-muted hover:border-line hover:text-fg"
           >
             <PaletteIcon />
           </button>
+          <LanguagePicker />
           {me && <UserMenu user={me} onPickTheme={() => setPicking(true)} />}
         </div>
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
-        <aside className="shrink-0 border-b border-line bg-surface md:w-56 md:overflow-y-auto md:border-r md:border-b-0">
+        <aside className="shrink-0 border-b border-line bg-surface md:w-56 md:overflow-y-auto md:border-e md:border-b-0">
           <nav className="flex gap-1 overflow-x-auto p-2 md:flex-col md:overflow-visible">
             {nav.map((item) =>
               item.to ? (
                 <Link
-                  key={item.label}
+                  key={item.key}
                   to={item.to}
-                  activeOptions={{ exact: 'exact' in item && item.exact }}
+                  activeOptions={{ exact: !!item.exact }}
                   className="border border-transparent px-3 py-1.5 text-sm whitespace-nowrap text-muted hover:text-fg"
                   activeProps={{ className: 'border-line! bg-raised text-fg!' }}
                 >
-                  {item.label}
+                  {label(item.key)}
                 </Link>
               ) : (
                 <span
-                  key={item.label}
-                  className="flex items-center justify-between gap-3 px-3 py-1.5 text-sm whitespace-nowrap text-muted/50"
+                  key={item.key}
+                  className="flex items-center justify-between gap-3 px-3 py-1.5 text-sm whitespace-nowrap text-muted/50 md:whitespace-normal"
                 >
-                  {item.label}
-                  <Badge tone="muted">soon</Badge>
+                  {label(item.key)}
+                  <Badge tone="muted">{t.shell.soon}</Badge>
                 </span>
               ),
             )}
@@ -106,6 +112,7 @@ function PaletteIcon() {
 function UserMenu({ user, onPickTheme }: { user: User; onPickTheme: () => void }) {
   const [open, setOpen] = useState(false)
   const theme = useTheme()
+  const t = useT()
   const root = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -144,7 +151,7 @@ function UserMenu({ user, onPickTheme }: { user: User; onPickTheme: () => void }
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label="Account menu"
+        aria-label={t.shell.accountMenu}
         title={user.email}
         className={cx(
           'flex size-8 items-center justify-center border bg-raised font-pixel text-sm text-accent',
@@ -154,12 +161,12 @@ function UserMenu({ user, onPickTheme }: { user: User; onPickTheme: () => void }
         {initial}
       </button>
       {open && (
-        <div role="menu" className="absolute top-full right-0 z-20 mt-2 w-64 border border-line bg-surface shadow-lg">
+        <div role="menu" className="absolute top-full end-0 z-20 mt-2 w-64 border border-line bg-surface shadow-lg">
           <div className="border-b border-line px-4 py-3">
-            <p className="truncate text-sm" title={user.email}>
+            <p dir="ltr" className="truncate text-start text-sm" title={user.email}>
               {user.email}
             </p>
-            <p className="text-xs text-muted capitalize">{user.role}</p>
+            <p className="text-xs text-muted capitalize">{user.role === 'owner' ? t.shell.owner : user.role}</p>
           </div>
           <div className="p-1">
             <button
@@ -169,9 +176,9 @@ function UserMenu({ user, onPickTheme }: { user: User; onPickTheme: () => void }
                 setOpen(false)
                 onPickTheme()
               }}
-              className="flex w-full items-center justify-between px-3 py-1.5 text-left text-sm text-muted hover:bg-raised hover:text-fg"
+              className="flex w-full items-center justify-between px-3 py-1.5 text-start text-sm text-muted hover:bg-raised hover:text-fg"
             >
-              Theme
+              {t.shell.theme}
               <span className="text-xs">{theme.name}</span>
             </button>
             <Link
@@ -180,16 +187,16 @@ function UserMenu({ user, onPickTheme }: { user: User; onPickTheme: () => void }
               onClick={() => setOpen(false)}
               className="block px-3 py-1.5 text-sm text-muted hover:bg-raised hover:text-fg"
             >
-              Settings
+              {t.common.settings}
             </Link>
             <button
               type="button"
               role="menuitem"
               onClick={() => logout.mutate()}
               disabled={logout.isPending}
-              className="block w-full px-3 py-1.5 text-left text-sm text-muted hover:bg-raised hover:text-danger disabled:opacity-50"
+              className="block w-full px-3 py-1.5 text-start text-sm text-muted hover:bg-raised hover:text-danger disabled:opacity-50"
             >
-              {logout.isPending ? 'Signing out…' : 'Sign out'}
+              {logout.isPending ? t.shell.signingOut : t.shell.signOut}
             </button>
           </div>
         </div>

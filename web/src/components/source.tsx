@@ -2,7 +2,9 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { gitBranchesQuery, gitReposQuery, gitSourcesQuery, type App, type GitSource, type SourceInput } from '../lib/api'
 import { repoName } from '../lib/format'
-import { cx, Field, SelectField } from './ui'
+import { rich, useT } from '../lib/i18n'
+import { ComboField, type ComboOption } from './combobox'
+import { cx, Field } from './ui'
 
 /** The source part of an app form, kept as strings while editing. */
 export type SourceForm = {
@@ -47,19 +49,19 @@ export function sourceChanged(f: SourceForm, app: App): boolean {
   return JSON.stringify(sourceInput(sourceForm(app))) !== JSON.stringify(sourceInput(f))
 }
 
-const choices: { value: SourceForm['source_type']; label: string }[] = [
-  { value: 'image', label: 'Image' },
-  { value: 'git', label: 'Git repository' },
-]
-
 const sourceLabel = (s: GitSource) => `${s.type === 'github_app' ? 'GitHub' : 'GitLab'} · ${s.name}`
 
 /** Image or Git repository, and the fields of the chosen one. */
 export function SourceFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceForm) => void }) {
   const set = (key: keyof SourceForm) => (e: { target: { value: string } }) => onChange({ ...form, [key]: e.target.value })
+  const t = useT()
+  const choices: { value: SourceForm['source_type']; label: string }[] = [
+    { value: 'image', label: t.source.image },
+    { value: 'git', label: t.source.gitRepository },
+  ]
   return (
     <div className="space-y-4">
-      <div role="radiogroup" aria-label="Source" className="inline-flex border border-line">
+      <div role="radiogroup" aria-label={t.source.source} className="inline-flex border border-line">
         {choices.map((c) => (
           <button
             key={c.value}
@@ -78,11 +80,12 @@ export function SourceFields({ form, onChange }: { form: SourceForm; onChange: (
       </div>
       {form.source_type === 'image' ? (
         <Field
-          label="Image"
+          label={t.source.image}
           name="image"
           required
+          dir="ltr"
           placeholder="nginx:1.27"
-          hint="Pulled from a public registry on every deploy."
+          hint={t.source.imageHint}
           value={form.image}
           onChange={set('image')}
         />
@@ -95,61 +98,63 @@ export function SourceFields({ form, onChange }: { form: SourceForm; onChange: (
 
 function GitFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceForm) => void }) {
   const set = (key: keyof SourceForm) => (e: { target: { value: string } }) => onChange({ ...form, [key]: e.target.value })
+  const t = useT()
   const sources = useQuery(gitSourcesQuery)
   const connected = form.git_source_id !== ''
+  const accessOptions: ComboOption[] = [
+    { value: '', label: t.source.publicByUrl },
+    ...(sources.data ?? []).map((x) => ({ value: x.id, label: sourceLabel(x) })),
+  ]
+  // The app's connection, while the list is loading or if it could not be loaded.
+  if (connected && !accessOptions.some((o) => o.value === form.git_source_id)) {
+    accessOptions.push({ value: form.git_source_id, label: t.source.gitConnection })
+  }
 
   return (
     <>
-      <SelectField
-        label="Repository access"
+      <ComboField
+        label={t.source.repositoryAccess}
         name="git_source_id"
+        options={accessOptions}
         value={form.git_source_id}
-        onChange={(e) => onChange({ ...form, git_source_id: e.target.value, git_repository: '', git_branch: 'main' })}
-        hint={
-          <>
-            Private repositories need a Git connection.{' '}
+        onChange={(id) => id !== form.git_source_id && onChange({ ...form, git_source_id: id, git_repository: '', git_branch: 'main' })}
+        searchPlaceholder={t.source.searchConnections}
+        hint={rich(t.source.accessHint, {
+          a: (c) => (
             <Link to="/settings" className="text-accent hover:underline">
-              Connect GitHub or GitLab in Settings
+              {c}
             </Link>
-            .
-          </>
-        }
-      >
-        <option value="">Public repository, by URL</option>
-        {sources.data?.map((s) => (
-          <option key={s.id} value={s.id}>
-            {sourceLabel(s)}
-          </option>
-        ))}
-        {/* The app's connection, while the list is loading or if it could not be loaded. */}
-        {connected && !sources.data?.some((s) => s.id === form.git_source_id) && <option value={form.git_source_id}>Git connection</option>}
-      </SelectField>
+          ),
+        })}
+      />
 
       {connected ? (
         <ConnectedRepo form={form} onChange={onChange} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
           <Field
-            label="Repository URL"
+            label={t.source.repositoryUrl}
             name="git_repository"
             type="url"
             required
+            dir="ltr"
             pattern="https://.+"
-            title="An https URL"
+            title={t.source.urlTitle}
             placeholder="https://github.com/org/app.git"
             value={form.git_repository}
             onChange={set('git_repository')}
           />
-          <Field label="Branch" name="git_branch" required placeholder="main" value={form.git_branch} onChange={set('git_branch')} />
+          <Field label={t.source.branch} name="git_branch" required dir="ltr" placeholder="main" value={form.git_branch} onChange={set('git_branch')} />
         </div>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
-          label="Build context"
+          label={t.source.buildContext}
           name="build_context"
+          dir="ltr"
           placeholder="."
-          hint="Folder inside the repository. Empty = its root."
+          hint={t.source.buildContextHint}
           value={form.build_context}
           onChange={set('build_context')}
         />
@@ -157,19 +162,21 @@ function GitFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceF
           label="Dockerfile"
           name="dockerfile_path"
           required
+          dir="ltr"
           placeholder="Dockerfile"
-          hint="Path from the build context."
+          hint={t.source.dockerfileHint}
           value={form.dockerfile_path}
           onChange={set('dockerfile_path')}
         />
       </div>
-      <p className="text-xs text-muted">Each deploy fetches the branch tip and builds it with its Dockerfile on this server.</p>
+      <p className="text-xs text-muted">{t.source.deployNote}</p>
     </>
   )
 }
 
 /** Repository and branch pickers for a Git connection. */
 function ConnectedRepo({ form, onChange }: { form: SourceForm; onChange: (f: SourceForm) => void }) {
+  const t = useT()
   const repos = useQuery(gitReposQuery(form.git_source_id))
   const selected = repos.data?.find((r) => r.clone_url === form.git_repository)
   const branches = useQuery({ ...gitBranchesQuery(form.git_source_id, selected?.full_name ?? ''), enabled: !!selected })
@@ -177,52 +184,60 @@ function ConnectedRepo({ form, onChange }: { form: SourceForm; onChange: (f: Sou
   const repoMissing = form.git_repository !== '' && !selected
   const branchMissing = form.git_branch !== '' && !!branches.data && !branches.data.includes(form.git_branch)
 
+  const repoOptions: ComboOption[] = (repos.data ?? []).map((r) => ({
+    value: r.clone_url,
+    label: r.full_name,
+    note: r.private ? undefined : t.source.public,
+  }))
+  if (repoMissing) repoOptions.unshift({ value: form.git_repository, label: repoName(form.git_repository) })
+  const branchOptions: ComboOption[] = (branches.data ?? []).map((b) => ({ value: b, label: b }))
+  if (branchMissing) branchOptions.unshift({ value: form.git_branch, label: form.git_branch })
+
   function pickRepo(cloneUrl: string) {
+    if (cloneUrl === form.git_repository) return
     const r = repos.data?.find((x) => x.clone_url === cloneUrl)
     onChange({ ...form, git_repository: cloneUrl, git_branch: r?.default_branch || 'main' })
   }
 
   return (
     <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
-      <SelectField
-        label="Repository"
+      <ComboField
+        label={t.source.repository}
         name="git_repository"
         required
+        options={repoOptions}
         value={form.git_repository}
-        onChange={(e) => pickRepo(e.target.value)}
+        onChange={pickRepo}
+        placeholder={repos.isPending ? t.source.loadingRepositories : t.source.chooseRepository}
+        searchPlaceholder={t.source.searchRepositories}
+        empty={t.source.noRepositoryMatches}
+        disabled={repos.isPending}
         hint={
           repos.error ? (
             <span className="text-danger">{repos.error.message}</span>
           ) : repos.data?.length === 0 ? (
-            'This connection can read no repository yet. Give it access to some in Settings.'
+            t.source.noRepositories
           ) : undefined
         }
-      >
-        <option value="" disabled>
-          {repos.isPending ? 'Loading repositories…' : 'Choose a repository'}
-        </option>
-        {repoMissing && <option value={form.git_repository}>{repoName(form.git_repository)}</option>}
-        {repos.data?.map((r) => (
-          <option key={r.clone_url} value={r.clone_url}>
-            {r.full_name}
-            {r.private ? '' : ' (public)'}
-          </option>
-        ))}
-      </SelectField>
+      />
       {branches.data ? (
-        <SelectField label="Branch" name="git_branch" required value={form.git_branch} onChange={(e) => onChange({ ...form, git_branch: e.target.value })}>
-          {branchMissing && <option value={form.git_branch}>{form.git_branch}</option>}
-          {branches.data.map((b) => (
-            <option key={b} value={b}>
-              {b}
-            </option>
-          ))}
-        </SelectField>
-      ) : (
-        <Field
-          label="Branch"
+        <ComboField
+          label={t.source.branch}
           name="git_branch"
           required
+          options={branchOptions}
+          value={form.git_branch}
+          onChange={(b) => onChange({ ...form, git_branch: b })}
+          placeholder={t.source.chooseBranch}
+          searchPlaceholder={t.source.searchBranches}
+          empty={t.source.noBranchMatches}
+        />
+      ) : (
+        <Field
+          label={t.source.branch}
+          name="git_branch"
+          required
+          dir="ltr"
           placeholder="main"
           hint={branches.error ? branches.error.message : undefined}
           value={form.git_branch}

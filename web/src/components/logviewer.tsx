@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { MAX_LINES, useLogStream, type LogLine } from '../lib/logstream'
+import { useT } from '../lib/i18n'
 import { cx } from './ui'
 
 const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })
@@ -10,6 +11,7 @@ const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-di
  * shown while lines keep arriving, Search filters to matching lines, Wrap toggles long lines.
  */
 export function LogViewer({ url, refused }: { url: string | null; refused?: string }) {
+  const t = useT()
   const { lines, state, end, reconnect } = useLogStream(url)
   const [follow, setFollow] = useState(true)
   const [wrap, setWrap] = useState(true)
@@ -38,30 +40,30 @@ export function LogViewer({ url, refused }: { url: string | null; refused?: stri
   }
 
   let status: ReactNode
-  if (state === 'live') status = <span className="text-accent">● live</span>
-  else if (state === 'connecting') status = <span className="text-warn">connecting…</span>
-  else if (state === 'error') status = <span className="text-danger">{refused ?? 'cannot open the stream'}</span>
-  else status = <span>{end?.reason ? `ended: ${end.reason}` : 'complete'}</span>
+  if (state === 'live') status = <span className="text-accent">{t.logviewer.live}</span>
+  else if (state === 'connecting') status = <span className="text-warn">{t.logviewer.connecting}</span>
+  else if (state === 'error') status = <span className="text-danger">{refused ?? t.logviewer.cannotOpen}</span>
+  else status = <span>{end?.reason ? t.logviewer.ended(end.reason) : t.logviewer.complete}</span>
 
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2">
         <input
           type="search"
-          aria-label="Search the log"
-          placeholder="Search"
+          aria-label={t.logviewer.searchLabel}
+          placeholder={t.logviewer.searchPlaceholder}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="h-8 min-w-0 flex-1 basis-40 border border-line bg-bg px-2 text-xs text-fg placeholder:text-muted/60 focus:border-accent focus:outline-none"
         />
-        <Toggle on={follow} onClick={() => setFollow(!follow)} title="Keep the newest line in view">
-          Follow
+        <Toggle on={follow} onClick={() => setFollow(!follow)} title={t.logviewer.followTitle}>
+          {t.logviewer.follow}
         </Toggle>
-        <Toggle on={!!frozen} onClick={() => setFrozen(frozen ? null : lines)} title="Freeze the view; lines keep arriving in the background">
-          {frozen ? 'Resume' : 'Pause'}
+        <Toggle on={!!frozen} onClick={() => setFrozen(frozen ? null : lines)} title={t.logviewer.pauseTitle}>
+          {frozen ? t.logviewer.resume : t.logviewer.pause}
         </Toggle>
-        <Toggle on={wrap} onClick={() => setWrap(!wrap)} title="Wrap long lines">
-          Wrap
+        <Toggle on={wrap} onClick={() => setWrap(!wrap)} title={t.logviewer.wrapTitle}>
+          {t.logviewer.wrap}
         </Toggle>
       </div>
 
@@ -70,7 +72,8 @@ export function LogViewer({ url, refused }: { url: string | null; refused?: stri
         onScroll={onScroll}
         tabIndex={0}
         role="log"
-        aria-label="Log output"
+        aria-label={t.logviewer.output}
+        dir={visible.length === 0 ? undefined : 'ltr'}
         className={cx(
           'max-h-[min(28rem,70vh)] min-h-40 overflow-y-auto bg-bg px-4 py-3 text-xs leading-relaxed',
           wrap ? 'overflow-x-hidden' : 'overflow-x-auto',
@@ -79,12 +82,12 @@ export function LogViewer({ url, refused }: { url: string | null; refused?: stri
         {visible.length === 0 ? (
           <p className="text-muted">
             {needle && shown.length > 0
-              ? 'No line matches the search.'
+              ? t.logviewer.noMatch
               : state === 'ended'
-                ? 'No output.'
+                ? t.logviewer.noOutput
                 : state === 'error'
                   ? ''
-                  : 'Waiting for output…'}
+                  : t.logviewer.waiting}
           </p>
         ) : (
           visible.map((l) => (
@@ -114,14 +117,19 @@ export function LogViewer({ url, refused }: { url: string | null; refused?: stri
           {/* A finished deployment log is complete; only a stream that broke off can be reopened. */}
           {(state === 'error' || (state === 'ended' && end?.reason)) && (
             <button type="button" className="underline hover:text-fg" onClick={reconnect}>
-              Reconnect
+              {t.logviewer.reconnect}
             </button>
           )}
-          {frozen && <span className="text-warn">paused{missed > 0 && ` · ${missed} new`}</span>}
+          {frozen && (
+            <span className="text-warn">
+              {t.logviewer.paused}
+              {missed > 0 && ` · ${t.logviewer.newLines(missed)}`}
+            </span>
+          )}
         </span>
         <span>
-          {needle ? `${visible.length} of ${shown.length} lines` : `${shown.length} lines`}
-          {lines.length >= MAX_LINES && ` (oldest dropped, last ${MAX_LINES} kept)`}
+          {needle ? t.logviewer.linesOf(visible.length, shown.length) : t.logviewer.lines(shown.length)}
+          {lines.length >= MAX_LINES && t.logviewer.dropped(MAX_LINES)}
         </span>
       </div>
     </div>

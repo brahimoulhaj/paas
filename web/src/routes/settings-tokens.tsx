@@ -3,10 +3,12 @@ import { useState, type FormEvent } from 'react'
 import { Button, ConfirmButton, Empty, ErrorNote, Field, Panel, QueryState } from '../components/ui'
 import { api, tokensQuery, type ApiToken } from '../lib/api'
 import { dateTime, timeAgo } from '../lib/format'
+import { rich, useT } from '../lib/i18n'
 
 /** API tokens: long-lived bearer credentials for scripts and CI. */
 export function ApiTokens() {
   const queryClient = useQueryClient()
+  const t = useT()
   const tokens = useQuery(tokensQuery)
   const [created, setCreated] = useState<ApiToken | null>(null)
   const closeSecret = () => {
@@ -15,26 +17,31 @@ export function ApiTokens() {
   }
 
   return (
-    <Panel title="API tokens">
+    <Panel title={t.settingsTokens.title}>
       <p className="border-b border-line p-4 text-xs text-muted">
-        For scripts and CI. Send one as <code className="text-fg">Authorization: Bearer &lt;token&gt;</code>. A token acts as you on
-        every API endpoint except this one: tokens cannot create or revoke tokens.
+        {rich(t.settingsTokens.intro, {
+          header: () => (
+            <code className="text-fg" dir="ltr">
+              Authorization: Bearer &lt;token&gt;
+            </code>
+          ),
+        })}
       </p>
       {created ? <NewSecret token={created} onDone={closeSecret} /> : <CreateToken onCreated={setCreated} />}
       {!tokens.data && (
         <div className="border-t border-line p-4">
-          <QueryState loading={tokens.isPending} error={tokens.error} what="tokens" />
+          <QueryState loading={tokens.isPending} error={tokens.error} what={t.settingsTokens.what} />
         </div>
       )}
       {tokens.data &&
         (tokens.data.length === 0 ? (
           <div className="border-t border-line">
-            <Empty title="No API tokens yet." />
+            <Empty title={t.settingsTokens.empty} />
           </div>
         ) : (
           <ul className="divide-y divide-line border-t border-line">
-            {tokens.data.map((t) => (
-              <TokenRow key={t.id} token={t} />
+            {tokens.data.map((token) => (
+              <TokenRow key={token.id} token={token} />
             ))}
           </ul>
         ))}
@@ -44,13 +51,14 @@ export function ApiTokens() {
 
 function CreateToken({ onCreated }: { onCreated: (t: ApiToken) => void }) {
   const queryClient = useQueryClient()
+  const t = useT()
   const [name, setName] = useState('')
   const create = useMutation({
     mutationFn: () => api<ApiToken>('/tokens', { method: 'POST', body: { name } }),
-    onSuccess: (t) => {
+    onSuccess: (token) => {
       setName('')
       queryClient.invalidateQueries({ queryKey: tokensQuery.queryKey })
-      onCreated(t)
+      onCreated(token)
     },
   })
 
@@ -64,7 +72,7 @@ function CreateToken({ onCreated }: { onCreated: (t: ApiToken) => void }) {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="flex-1">
           <Field
-            label="Name"
+            label={t.common.name}
             name="token-name"
             placeholder="github-actions"
             maxLength={64}
@@ -74,7 +82,7 @@ function CreateToken({ onCreated }: { onCreated: (t: ApiToken) => void }) {
           />
         </div>
         <Button type="submit" disabled={!name.trim() || create.isPending}>
-          {create.isPending ? 'Creating…' : 'Create token'}
+          {create.isPending ? t.common.creating : t.settingsTokens.createToken}
         </Button>
       </div>
       {create.error && <ErrorNote>{create.error.message}</ErrorNote>}
@@ -84,6 +92,7 @@ function CreateToken({ onCreated }: { onCreated: (t: ApiToken) => void }) {
 
 /** The secret of a token just created. It is shown here once and never again. */
 function NewSecret({ token, onDone }: { token: ApiToken; onDone: () => void }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
   const secret = token.token ?? ''
 
@@ -99,25 +108,26 @@ function NewSecret({ token, onDone }: { token: ApiToken; onDone: () => void }) {
   return (
     <div className="space-y-3 border-b border-line bg-raised p-4">
       <p className="text-sm">
-        Token <span className="text-accent">{token.name}</span> created. Copy it now: it is not shown again.
+        {rich(t.settingsTokens.created, { name: () => <span className="text-accent">{token.name}</span> })}
       </p>
       <div className="flex flex-col gap-2 sm:flex-row">
         <input
           readOnly
           value={secret}
-          aria-label="New API token"
+          aria-label={t.settingsTokens.newTokenLabel}
+          dir="ltr"
           onFocus={(e) => e.target.select()}
           className="block h-9 min-w-0 flex-1 border border-accent bg-bg px-3 text-sm text-fg focus:outline-none"
         />
         <Button type="button" variant="ghost" onClick={copy}>
-          {copied ? 'Copied' : 'Copy'}
+          {copied ? t.common.copied : t.common.copy}
         </Button>
       </div>
-      <pre className="overflow-x-auto border border-line bg-bg p-3 text-xs text-muted">
+      <pre dir="ltr" className="overflow-x-auto border border-line bg-bg p-3 text-xs text-muted">
         curl -H "Authorization: Bearer {secret}" {location.origin}/api/projects
       </pre>
       <Button type="button" onClick={onDone}>
-        Done
+        {t.common.done}
       </Button>
     </div>
   )
@@ -125,6 +135,7 @@ function NewSecret({ token, onDone }: { token: ApiToken; onDone: () => void }) {
 
 function TokenRow({ token }: { token: ApiToken }) {
   const queryClient = useQueryClient()
+  const t = useT()
   const revoke = useMutation({
     mutationFn: () => api<void>(`/tokens/${token.id}`, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: tokensQuery.queryKey }),
@@ -134,13 +145,15 @@ function TokenRow({ token }: { token: ApiToken }) {
       <div className="min-w-0">
         <p className="truncate text-sm">{token.name}</p>
         <p className="text-xs text-muted">
-          <span title={dateTime(token.created_at)}>created {timeAgo(token.created_at)}</span>
+          <span title={dateTime(token.created_at)}>{t.settingsTokens.createdAgo(timeAgo(token.created_at))}</span>
           {' · '}
-          <span title={dateTime(token.last_used_at)}>{token.last_used_at ? `last used ${timeAgo(token.last_used_at)}` : 'never used'}</span>
+          <span title={dateTime(token.last_used_at)}>
+            {token.last_used_at ? t.settingsTokens.lastUsed(timeAgo(token.last_used_at)) : t.settingsTokens.neverUsed}
+          </span>
         </p>
         {revoke.error && <p className="text-xs text-danger">{revoke.error.message}</p>}
       </div>
-      <ConfirmButton label="Revoke" confirm="Yes, revoke" pending={revoke.isPending} onConfirm={() => revoke.mutate()} />
+      <ConfirmButton label={t.settingsTokens.revoke} confirm={t.settingsTokens.yesRevoke} pending={revoke.isPending} onConfirm={() => revoke.mutate()} />
     </li>
   )
 }

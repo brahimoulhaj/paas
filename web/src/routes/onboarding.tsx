@@ -3,6 +3,7 @@ import { getRouteApi, useNavigate } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { Button, cx, ErrorNote } from '../components/ui'
 import { api, metaQuery, onboardingQuery } from '../lib/api'
+import { rich, useT } from '../lib/i18n'
 import { PanelDomain } from './settings'
 
 const route = getRouteApi('/onboarding')
@@ -12,29 +13,22 @@ const route = getRouteApi('/onboarding')
  * whole guide stays reachable from Settings. Later milestones add their steps here
  * (S3 connection, registry, notifications).
  */
-const steps: { id: string; title: string; intro: string; body: () => ReactNode }[] = [
+const allSteps = (t: ReturnType<typeof useT>): { id: string; title: string; intro: string; body: () => ReactNode }[] => [
   {
     id: 'domain',
-    title: 'Panel domain',
-    intro:
-      'Serve this panel on its own hostname over HTTPS. Without one it stays on http://<server-ip>, which is fine to start with.',
+    title: t.onboarding.domainTitle,
+    intro: t.onboarding.domainIntro,
     body: () => <PanelDomain bare />,
   },
   {
     id: 'deploy',
-    title: 'First deploy',
-    intro: 'That is all the setup there is for now. Next: a project, an app from any public image, and a domain for it.',
+    title: t.onboarding.deployTitle,
+    intro: t.onboarding.deployIntro,
     body: () => (
       <ul className="space-y-2 border border-line bg-surface p-4 text-sm text-muted">
-        <li>
-          <span className="text-fg">Project</span> — a folder for related apps.
-        </li>
-        <li>
-          <span className="text-fg">App</span> — one container image run as one container, with CPU and memory limits.
-        </li>
-        <li>
-          <span className="text-fg">Domain</span> — attach one to an app and it is served over HTTPS with an automatic certificate.
-        </li>
+        {[t.onboarding.projectLine, t.onboarding.appLine, t.onboarding.domainLine].map((line) => (
+          <li key={line}>{rich(line, { b: (c) => <span className="text-fg">{c}</span> })}</li>
+        ))}
       </ul>
     ),
   },
@@ -45,6 +39,8 @@ export function OnboardingPage() {
   const { data: meta } = useSuspenseQuery(metaQuery)
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const t = useT()
+  const steps = allSteps(t)
   const index = Math.min(Math.max(stepParam, 0), steps.length - 1)
   const step = steps[index]
   const last = index === steps.length - 1
@@ -64,11 +60,11 @@ export function OnboardingPage() {
         <div className="flex items-baseline justify-between gap-4">
           <p className="font-pixel text-xl text-accent">{meta.name}</p>
           <button type="button" className="text-xs text-muted hover:text-fg" disabled={finish.isPending} onClick={() => finish.mutate('/')}>
-            Skip setup
+            {t.onboarding.skip}
           </button>
         </div>
 
-        <ol className="flex flex-wrap gap-2" aria-label="Setup steps">
+        <ol className="flex flex-wrap gap-2" aria-label={t.onboarding.stepsLabel}>
           {steps.map((s, i) => (
             <li key={s.id}>
               <button
@@ -98,20 +94,20 @@ export function OnboardingPage() {
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-4">
           <Button variant="ghost" type="button" disabled={index === 0} onClick={() => go(index - 1)}>
-            Back
+            {t.onboarding.back}
           </Button>
           {last ? (
             <span className="flex flex-wrap gap-2">
               <Button variant="ghost" type="button" disabled={finish.isPending} onClick={() => finish.mutate('/')}>
-                Go to overview
+                {t.onboarding.goToOverview}
               </Button>
               <Button type="button" disabled={finish.isPending} onClick={() => finish.mutate('/projects')}>
-                Create a project
+                {t.onboarding.createProject}
               </Button>
             </span>
           ) : (
             <Button type="button" onClick={() => go(index + 1)}>
-              Next
+              {t.onboarding.next}
             </Button>
           )}
         </div>
