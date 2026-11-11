@@ -51,6 +51,7 @@ Usage:
   %[2]s owner create --email E [--password P]        create an owner account
   %[2]s owner reset-password [--email E] [--password P]
                                                      set a new password and sign out all sessions
+  %[2]s update [--check] [--yes]                     update the panel to the newest release
   %[2]s version
 
 Environment:
@@ -76,6 +77,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "serve":
 		return serve(ctx, cfg)
+	case "update":
+		return updateCmd(ctx, cfg, args[1:])
 	case "update-apply": // run by the update helper container, not by people
 		return updateApply(ctx, cfg, args[1:])
 	case "setup-token":
@@ -426,6 +429,65 @@ func recordUpdateResult(ctx context.Context, r update.Result, st *store.Store, l
 		return
 	}
 	_ = st.SetSetting(ctx, store.SettingUpdateSeen, stamp)
+}
+
+// updateCmd is `update` on the command line: the same check and swap as Settings → Updates,
+// for a panel reached over SSH. It runs inside the panel's container (the host wrapper
+// execs into it), so the panel stops a moment after the helper starts, and so does this.
+func updateCmd(ctx context.Context, cfg config.Config, args []string) error {
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	checkOnly := fs.Bool("check", false, "only report whether an update is available")
+	yes := fs.Bool("yes", false, "update without asking")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	return withStore(ctx, cfg, func(st *store.Store, _ *account.Service) error {
+		log := slog.New(slog.NewTextHandler(io.Discard, nil))
+		u := newUpdater(ctx, cfg, st, log)
+		if u == nil {
+			return errors.New("updates need the Docker socket, which this process cannot reach")
+		}
+		fmt.Println("Checking for updates…")
+		info := u.Check(ctx)
+		fmt.Printf("Running   %s (%s)\n", info.Version, orDash(info.Image))
+		switch {
+		case !info.Supported:
+			return errors.New("updates are not supported here: " + info.Reason)
+		case info.Error != "":
+			return errors.New(info.Error)
+		case !info.Available:
+			fmt.Println("Up to date.")
+			return nil
+		}
+		fmt.Printf("Available %s (%s)\n", info.Latest, info.LatestImage)
+		if *checkOnly {
+			return nil
+		}
+		if !*yes {
+			fmt.Print("Update now? The panel restarts; deployed apps keep running. [y/N] ")
+			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
+			if a := strings.ToLower(strings.TrimSpace(line)); a != "y" && a != "yes" {
+				fmt.Println("Not updated.")
+				return nil
+			}
+		}
+		fmt.Printf("Pulling %s…\n", info.LatestImage)
+		if err := u.Apply(ctx); err != nil {
+			return err
+		}
+		_ = st.AddEvent(ctx, store.Event{Actor: "cli", Action: "panel.update", TargetType: "panel",
+			TargetName: info.Latest, Detail: info.Image + " → " + info.LatestImage})
+		fmt.Printf("The update helper is swapping the panel to %s; this session ends when the panel stops.\n"+
+			"Follow it with: docker logs -f %s-updater\nThen check with: %s version\n", info.Latest, brand.Slug, brand.Slug)
+		return nil
+	})
+}
+
+func orDash(s string) string {
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // updateApply is the helper's side of an update: swap the panel container.

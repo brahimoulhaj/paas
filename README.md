@@ -19,7 +19,8 @@ It installs Docker if needed, starts the panel and prints a one-time setup link
 `… | sudo BERTH_PUBLIC_URL=http://203.0.113.10 sh`. A specific version:
 `https://github.com/brahimoulhaj/paas/releases/download/v0.1.1/install.sh`.
 
-Later versions install from the panel: Settings → Updates.
+Later versions install from the panel (Settings → Updates) or over SSH with `berth update`
+(`--check` only reports, `--yes` skips the prompt).
 
 ## Requirements
 

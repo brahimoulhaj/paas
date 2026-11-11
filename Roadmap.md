@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ☐ · M3 ☐ · M4 ☐ · M5 ☐ · M6 ☐
 
-**Next up:** M1 → updates (updater container, `berth update`), then publish the image to a registry to finish the installer's pull path. Still open in M1: the onboarding steps for S3, registry and notifications wait for their milestones.
+**Next up:** release and run `berth update` on the VPS; try Let's Encrypt on a domain that is not behind Cloudflare's proxy (panel and app); time a fresh install. Then M2. Still open in M1: the onboarding steps for S3, registry and notifications wait for their milestones.
 
 ---
 
@@ -25,7 +25,7 @@ Everything needed before the first feature: repo layout, tooling, and the shared
 - [ ] Linting (golangci-lint, eslint)
 - [x] Multi-stage `Dockerfile` (web build → Go build → slim runtime image) — `make image`, 36 MB, runs on a fresh Ubuntu 24.04 arm64 VM
 - [x] `.gitignore`, `.editorconfig`, README with dev setup
-- [ ] CI: vet, test, web typecheck and build
+- [x] CI: vet, test (`-short -race`), web typecheck and build, installer renders — `.github/workflows/ci.yml`, green on `main`
 - [ ] Decide license (open question in the doc)
 
 ### Store (`internal/store`)
@@ -96,7 +96,7 @@ Verified by `internal/proxy/manager_test.go` against a real Caddy container (ski
 - [x] Config builder: full Caddy JSON derived from SQLite (panel domain and one route per app with domains)
 - [x] Rebuild and push the full config on startup (also written to the file Caddy boots from)
 - [x] Route `http://<server-ip>` to the panel UI
-- [~] Panel domain with automatic TLS — `GET/PUT /api/settings/panel`, verified with Caddy's internal CA; not yet tried with a public domain and Let's Encrypt; settings screen and onboarding step done
+- [~] Panel domain with automatic TLS — `GET/PUT /api/settings/panel`, verified with Caddy's internal CA; on a real VPS as `http_only` behind Cloudflare's proxy (`ops.azayr.com`, 2026-11-11), Let's Encrypt on a direct (unproxied) domain not yet tried; settings screen and onboarding step done
 - [~] Per-app route with automatic TLS (`tls_mode = auto`) — verified end to end with Caddy's internal CA on a `.test` name; not yet tried with a public domain and Let's Encrypt
 - [x] Atomic upstream patch for a single route
 - [x] Socket admin mode end to end on a Linux host — installed panel on an Ubuntu 24.04 VM: `proxy ready admin=socket`, deploy and route switch work (2026-11-11)
@@ -126,13 +126,13 @@ Verified by API tests (with the race detector) and in a browser against a real n
 - [x] Checks: root, OS, architecture, ports 80 and 443 free (skipped on a re-run, which finds its own proxy there)
 - [x] Docker Engine check and install from Docker's official script — verified on a VM without Docker (installed 29.9.3 with Compose)
 - [x] Create `/var/lib/berth` and the Docker network
-- [~] Pull and start the panel image with the socket and data dir mounted — Compose project in `/var/lib/berth/compose.yaml`; start verified with a loaded image (`BERTH_PULL=never`), pulling from a registry not tried yet (no registry)
+- [x] Pull and start the panel image with the socket and data dir mounted — Compose project in `/var/lib/berth/compose.yaml`; installed on a real VPS from `ghcr.io/brahimoulhaj/paas` with the one-command install (2026-11-11)
 - [x] Print the setup URL with the one-time token; `berth` host command wraps the CLI in the container
 - [~] Under 60 seconds on a server that already has Docker — 2 s with the images already local; image download time from a registry still to measure
 
 ### Updates
-- [ ] Short-lived updater container that pulls the new image and recreates the panel
-- [ ] `berth update` and an update button with the available version
+- [x] Short-lived updater container that pulls the new image and recreates the panel — `internal/update` (registry check by semver tag or digest, helper runs `update-apply` to swap the container, result recorded as an event); registry and compose-rewrite logic unit-tested; on a real VPS the panel updated itself 0.1.x → 0.2.0 → 0.2.1 from GHCR (2026-11-11)
+- [~] `berth update` and an update button with the available version — Settings → Updates: check, update now, hourly automatic updates (wait while a deploy runs); `berth update [--check] [--yes]` built (same check and helper; refuses while a helper is already swapping), not yet run on the VPS
 
 ### UI
 Checked in a browser against a real deploy (create project and app, add domain, deploy, failed redeploy, stop/start, delete), desktop and phone width.
@@ -145,7 +145,7 @@ Checked in a browser against a real deploy (create project and app, add domain, 
 - [x] App page: overview, deployments (live log), logs (live container output), domains (with DNS hint), settings
 - [x] Activity feed
 - [x] API tokens section on the Settings page: create (secret shown once, copy, curl example), list with last use, revoke
-- [x] Panel domain options: HTTP only (CDN terminates TLS) and "disable access by IP" (unknown hosts dropped; needs a domain; recovery through `127.0.0.1:8080` over SSH)
+- [x] Panel domain options: HTTP only (CDN terminates TLS) and "disable access by IP" (unknown hosts dropped; needs a domain; recovery through `127.0.0.1:8080` over SSH); both on in production on a real VPS (2026-11-11)
 - [x] Settings page with the panel domain section: set, change, remove, certificate email, DNS hint (`/api/settings/panel/dns`); checked in a browser with `panel.test` through Caddy's internal CA
 
 ---
@@ -230,7 +230,7 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 - [ ] Auto-deploy toggle per app; regenerate deploy token
 
 ### TLS modes
-- [x] `http_only` (behind Cloudflare proxy) — per domain, chosen when adding it or switched later (`PATCH /api/domains/{id}`); served on :80 with no certificate and no redirect; verified against Caddy in dev (2026-11-11)
+- [x] `http_only` (behind Cloudflare proxy) — per domain, chosen when adding it or switched later (`PATCH /api/domains/{id}`); served on :80 with no certificate and no redirect; verified against Caddy in dev and in production: panel domain `ops.azayr.com` behind Cloudflare (SSL Flexible) on a real VPS (2026-11-11)
 - [ ] `dns01` (wildcards; provider credentials)
 - [ ] `custom` — upload certificate and key, expiry tracking
 - [ ] Domain redirects (`redirect_to`), www / apex
@@ -350,7 +350,7 @@ Goal: see what the server is doing and get told when something breaks.
 - [ ] Security review: socket exposure, secrets at rest, webhook token handling, headers
 - [ ] Panel self-backup (SQLite file + key) and restore procedure
 - [ ] Docs: install, first deploy, backups, updates, recovery CLI
-- [ ] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog
+- [x] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog — push a `vX.Y.Z` tag; `.github/workflows/release.yml` publishes `ghcr.io/brahimoulhaj/paas:X.Y.Z` and `:latest` and a GitHub release with generated notes (v0.1.0 → v0.2.1 published)
 
 ## Out of v1
 

@@ -366,6 +366,12 @@ func (s *Service) startHelper(ctx context.Context, target, from string) error {
 	pull.Close()
 
 	name := brand.Slug + "-updater"
+	// The panel and `update` on the command line each have their own Service; a helper
+	// already swapping containers must not be removed under it.
+	if prev, err := s.opts.Docker.ContainerInspect(ctx, name, client.ContainerInspectOptions{}); err == nil &&
+		prev.Container.State != nil && prev.Container.State.Running {
+		return ErrBusy
+	}
 	_, _ = s.opts.Docker.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true})
 	created, err := s.opts.Docker.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Name: name,
