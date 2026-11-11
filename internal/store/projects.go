@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net"
 	"strconv"
@@ -120,6 +121,7 @@ const (
 )
 
 type App struct {
+	Environment         map[string]string
 	ID                  string
 	ProjectID           string
 	Name                string
@@ -137,16 +139,26 @@ type App struct {
 
 const appCols = `id, project_id, name, source_type, image, port, cpu_limit, memory_limit_mb,
 	desired_state, COALESCE(current_deployment_id, ''),
-	git_repository, git_branch, builder, build_context, dockerfile_path, COALESCE(git_source_id, ''), created_at, updated_at`
+	git_repository, git_branch, builder, build_context, dockerfile_path, COALESCE(git_source_id, ''), environment, created_at, updated_at`
 
 func scanApp(row scanner) (App, error) {
 	var a App
+	var environment string
 	var created, updated string
 	err := row.Scan(&a.ID, &a.ProjectID, &a.Name, &a.SourceType, &a.Image, &a.Port, &a.CPULimit, &a.MemoryMB,
 		&a.DesiredState, &a.CurrentDeploymentID,
-		&a.Git.Repository, &a.Git.Branch, &a.Git.Builder, &a.Git.BuildContext, &a.Git.Dockerfile, &a.Git.ConnectionID, &created, &updated)
+		&a.Git.Repository, &a.Git.Branch, &a.Git.Builder, &a.Git.BuildContext, &a.Git.Dockerfile, &a.Git.ConnectionID, &environment, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
+	}
+	if err != nil {
+		return a, err
+	}
+	if err := json.Unmarshal([]byte(environment), &a.Environment); err != nil {
+		return a, err
+	}
+	if a.Environment == nil {
+		a.Environment = map[string]string{}
 	}
 	a.CreatedAt, a.UpdatedAt = parseTime(created), parseTime(updated)
 	return a, err
@@ -174,13 +186,14 @@ type GitSource struct {
 // AppInput holds the fields a user can set on an app. Image is used by image apps and
 // Git by Git apps; the other one is stored empty.
 type AppInput struct {
-	Name       string
-	SourceType string
-	Image      string
-	Git        GitSource
-	Port       int
-	CPULimit   float64
-	MemoryMB   int64
+	Environment map[string]string
+	Name        string
+	SourceType  string
+	Image       string
+	Git         GitSource
+	Port        int
+	CPULimit    float64
+	MemoryMB    int64
 }
 
 // normalized empties the fields the source type does not use.
@@ -195,13 +208,17 @@ func (in AppInput) normalized() AppInput {
 
 func (s *Store) CreateApp(ctx context.Context, projectID string, in AppInput) (App, error) {
 	in = in.normalized()
+	environment, err := json.Marshal(in.Environment)
+	if err != nil {
+		return App{}, err
+	}
 	aid, ts := id.New(), now()
-	_, err := s.db.ExecContext(ctx, `
+	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO apps (id, project_id, name, source_type, image, port, cpu_limit, memory_limit_mb, desired_state,
-			git_repository, git_branch, builder, build_context, dockerfile_path, git_source_id, created_at, updated_at)
-		SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ? FROM projects WHERE id = ?`,
+			git_repository, git_branch, builder, build_context, dockerfile_path, git_source_id, environment, created_at, updated_at)
+		SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ? FROM projects WHERE id = ?`,
 		aid, in.Name, in.SourceType, in.Image, in.Port, in.CPULimit, in.MemoryMB, StateStopped,
-		in.Git.Repository, in.Git.Branch, in.Git.Builder, in.Git.BuildContext, in.Git.Dockerfile, in.Git.ConnectionID, ts, ts, projectID)
+		in.Git.Repository, in.Git.Branch, in.Git.Builder, in.Git.BuildContext, in.Git.Dockerfile, in.Git.ConnectionID, string(environment), ts, ts, projectID)
 	if err != nil {
 		return App{}, conflict(err)
 	}
@@ -237,13 +254,17 @@ func (s *Store) ListApps(ctx context.Context, projectID string) ([]App, error) {
 
 func (s *Store) UpdateApp(ctx context.Context, appID string, in AppInput) (App, error) {
 	in = in.normalized()
-	err := affected(s.db.ExecContext(ctx, `
+	environment, err := json.Marshal(in.Environment)
+	if err != nil {
+		return App{}, err
+	}
+	err = affected(s.db.ExecContext(ctx, `
 		UPDATE apps SET name = ?, source_type = ?, image = ?, port = ?, cpu_limit = ?, memory_limit_mb = ?,
 			git_repository = ?, git_branch = ?, builder = ?, build_context = ?, dockerfile_path = ?,
-			git_source_id = NULLIF(?, ''), updated_at = ?
+			git_source_id = NULLIF(?, ''), environment = ?, updated_at = ?
 		WHERE id = ?`,
 		in.Name, in.SourceType, in.Image, in.Port, in.CPULimit, in.MemoryMB,
-		in.Git.Repository, in.Git.Branch, in.Git.Builder, in.Git.BuildContext, in.Git.Dockerfile, in.Git.ConnectionID, now(), appID))
+		in.Git.Repository, in.Git.Branch, in.Git.Builder, in.Git.BuildContext, in.Git.Dockerfile, in.Git.ConnectionID, string(environment), now(), appID))
 	if err != nil {
 		return App{}, err
 	}

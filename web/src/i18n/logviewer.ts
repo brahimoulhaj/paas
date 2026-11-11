@@ -1,6 +1,8 @@
 // Texts of the live log viewer.
 
 export const en = {
+  lineLimit: 'Line limit',
+  lastLines: (n: number) => `Last ${n}`,
   live: '● live',
   connecting: 'connecting…',
   cannotOpen: 'cannot open the stream',
@@ -28,6 +30,8 @@ export const en = {
 }
 
 export const fr: typeof en = {
+  lineLimit: 'Nombre de lignes',
+  lastLines: (n: number) => `Dernières lignes : ${n}`,
   live: '● en direct',
   connecting: 'connexion…',
   cannotOpen: 'impossible d’ouvrir le flux',
@@ -58,6 +62,8 @@ const arLines = (n: number) =>
   n === 0 ? 'لا أسطر' : n === 1 ? 'سطر واحد' : n === 2 ? 'سطران' : n % 100 >= 3 && n % 100 <= 10 ? `${n} أسطر` : `${n} سطرًا`
 
 export const ar: typeof en = {
+  lineLimit: 'عدد الأسطر',
+  lastLines: (n: number) => `آخر الأسطر: ${n}`,
   live: '● مباشر',
   connecting: 'جارٍ الاتصال…',
   cannotOpen: 'تعذّر فتح البث',
@@ -85,6 +91,8 @@ export const ar: typeof en = {
 }
 
 export const es: typeof en = {
+  lineLimit: 'Límite de líneas',
+  lastLines: (n: number) => `Últimas líneas: ${n}`,
   live: '● en directo',
   connecting: 'conectando…',
   cannotOpen: 'no se puede abrir el flujo',

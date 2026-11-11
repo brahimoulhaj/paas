@@ -554,3 +554,35 @@ func TestDeployFromPrivateGit(t *testing.T) {
 		t.Errorf("credentials failure: %+v", dep)
 	}
 }
+
+type environmentExecutor struct {
+	executor.Executor
+	environment map[string]string
+}
+
+func (e *environmentExecutor) CreateContainer(ctx context.Context, spec executor.ContainerSpec) (string, error) {
+	e.environment = spec.Env
+	return e.Executor.CreateContainer(ctx, spec)
+}
+func TestDeployEnvironment(t *testing.T) {
+	e := newEnv(t)
+	values := map[string]string{"APP_ENV": "production", "TOKEN": "a=b#c", "EMPTY": ""}
+	var err error
+	e.app, err = e.st.UpdateApp(context.Background(), e.app.ID, store.AppInput{
+		Name: e.app.Name, Image: e.app.Image, Port: e.app.Port, Environment: values,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ex := &environmentExecutor{Executor: e.ex}
+	e.svc = New(context.Background(), Options{Store: e.st, Executor: ex, Router: e.router, DataDir: e.dir, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), StartGrace: 20 * time.Millisecond})
+	d := e.deploy()
+	if d.Status != store.DeploySucceeded {
+		t.Fatalf("deployment failed: %s", d.Error)
+	}
+	for k, v := range values {
+		if got, ok := ex.environment[k]; !ok || got != v {
+			t.Fatalf("variable %s not passed to container", k)
+		}
+	}
+}

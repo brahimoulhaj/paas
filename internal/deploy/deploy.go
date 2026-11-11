@@ -199,6 +199,7 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 		Labels:     map[string]string{"deployment": dep.ID},
 		CPUs:       app.CPULimit,
 		MemoryMB:   app.MemoryMB,
+		Env:        app.Environment,
 	})
 	if err != nil {
 		fail("", err)

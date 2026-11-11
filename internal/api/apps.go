@@ -60,30 +60,32 @@ func toProjectJSON(p store.Project) projectJSON {
 }
 
 type appJSON struct {
-	ID                  string    `json:"id"`
-	ProjectID           string    `json:"project_id"`
-	Name                string    `json:"name"`
-	SourceType          string    `json:"source_type"`
-	Image               string    `json:"image"`
-	Port                int       `json:"port"`
-	CPULimit            float64   `json:"cpu_limit"`
-	MemoryLimitMB       int64     `json:"memory_limit_mb"`
-	DesiredState        string    `json:"desired_state"`
-	CurrentDeploymentID string    `json:"current_deployment_id"`
-	GitSourceID         string    `json:"git_source_id"`
-	GitRepository       string    `json:"git_repository"`
-	GitBranch           string    `json:"git_branch"`
-	Builder             string    `json:"builder"`
-	BuildContext        string    `json:"build_context"`
-	DockerfilePath      string    `json:"dockerfile_path"`
-	RuntimeState        string    `json:"runtime_state,omitempty"` // single-app responses only
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	Environment         map[string]string `json:"environment"`
+	ID                  string            `json:"id"`
+	ProjectID           string            `json:"project_id"`
+	Name                string            `json:"name"`
+	SourceType          string            `json:"source_type"`
+	Image               string            `json:"image"`
+	Port                int               `json:"port"`
+	CPULimit            float64           `json:"cpu_limit"`
+	MemoryLimitMB       int64             `json:"memory_limit_mb"`
+	DesiredState        string            `json:"desired_state"`
+	CurrentDeploymentID string            `json:"current_deployment_id"`
+	GitSourceID         string            `json:"git_source_id"`
+	GitRepository       string            `json:"git_repository"`
+	GitBranch           string            `json:"git_branch"`
+	Builder             string            `json:"builder"`
+	BuildContext        string            `json:"build_context"`
+	DockerfilePath      string            `json:"dockerfile_path"`
+	RuntimeState        string            `json:"runtime_state,omitempty"` // single-app responses only
+	CreatedAt           time.Time         `json:"created_at"`
+	UpdatedAt           time.Time         `json:"updated_at"`
 }
 
 func toAppJSON(a store.App) appJSON {
 	return appJSON{
-		ID: a.ID, ProjectID: a.ProjectID, Name: a.Name, SourceType: a.SourceType, Image: a.Image, Port: a.Port,
+		Environment: a.Environment,
+		ID:          a.ID, ProjectID: a.ProjectID, Name: a.Name, SourceType: a.SourceType, Image: a.Image, Port: a.Port,
 		CPULimit: a.CPULimit, MemoryLimitMB: a.MemoryMB, DesiredState: a.DesiredState,
 		CurrentDeploymentID: a.CurrentDeploymentID,
 		GitSourceID:         a.Git.ConnectionID,
@@ -301,18 +303,19 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 // appFields is the JSON of the settable app fields. Every field is optional: a create
 // starts from defaults, an update from the app as it is.
 type appFields struct {
-	Name           *string  `json:"name"`
-	SourceType     *string  `json:"source_type"`
-	Image          *string  `json:"image"`
-	GitSourceID    *string  `json:"git_source_id"`
-	GitRepository  *string  `json:"git_repository"`
-	GitBranch      *string  `json:"git_branch"`
-	Builder        *string  `json:"builder"`
-	BuildContext   *string  `json:"build_context"`
-	DockerfilePath *string  `json:"dockerfile_path"`
-	Port           *int     `json:"port"`
-	CPULimit       *float64 `json:"cpu_limit"`
-	MemoryLimitMB  *int64   `json:"memory_limit_mb"`
+	Environment    *map[string]string `json:"environment"`
+	Name           *string            `json:"name"`
+	SourceType     *string            `json:"source_type"`
+	Image          *string            `json:"image"`
+	GitSourceID    *string            `json:"git_source_id"`
+	GitRepository  *string            `json:"git_repository"`
+	GitBranch      *string            `json:"git_branch"`
+	Builder        *string            `json:"builder"`
+	BuildContext   *string            `json:"build_context"`
+	DockerfilePath *string            `json:"dockerfile_path"`
+	Port           *int               `json:"port"`
+	CPULimit       *float64           `json:"cpu_limit"`
+	MemoryLimitMB  *int64             `json:"memory_limit_mb"`
 }
 
 // apply sets the fields present in f on in, trimmed, and fills Git defaults.
@@ -321,6 +324,9 @@ func (f appFields) apply(in store.AppInput) store.AppInput {
 		if v != nil {
 			*dst = strings.TrimSpace(*v)
 		}
+	}
+	if f.Environment != nil {
+		in.Environment = *f.Environment
 	}
 	str(&in.Name, f.Name)
 	str(&in.SourceType, f.SourceType)
@@ -387,7 +393,25 @@ func validGitURL(raw string) bool {
 		u.RawQuery == "" && u.Fragment == ""
 }
 
+var environmentNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 func validApp(w http.ResponseWriter, in store.AppInput) bool {
+	if len(in.Environment) > 500 {
+		invalid(w, "at most 500 environment variables are allowed")
+		return false
+	}
+	total := 0
+	for key, value := range in.Environment {
+		total += len(key) + len(value)
+		if !environmentNameRe.MatchString(key) || len(key) > 256 || strings.ContainsRune(value, 0) {
+			invalid(w, "environment variable names must contain letters, digits or underscores and cannot start with a digit; values cannot contain NUL")
+			return false
+		}
+	}
+	if total > 128*1024 {
+		invalid(w, "environment variables must total at most 128 KiB")
+		return false
+	}
 	g := in.Git
 	git := in.SourceType == store.SourceGit
 	switch {
@@ -478,7 +502,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input := in.apply(store.AppInput{
-		Name: a.Name, SourceType: a.SourceType, Image: a.Image, Git: a.Git,
+		Environment: a.Environment, Name: a.Name, SourceType: a.SourceType, Image: a.Image, Git: a.Git,
 		Port: a.Port, CPULimit: a.CPULimit, MemoryMB: a.MemoryMB,
 	})
 	if !validApp(w, input) || !s.validGitSource(w, r, input) {

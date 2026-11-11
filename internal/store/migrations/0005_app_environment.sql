@@ -1,0 +1,1 @@
+ALTER TABLE apps ADD COLUMN environment TEXT NOT NULL DEFAULT '{}';

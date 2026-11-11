@@ -1,3 +1,4 @@
+import { EnvironmentSettings } from '../components/environment'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
@@ -365,7 +366,7 @@ function RuntimeLogs({ app }: { app: App }) {
     <Panel title={t.app.containerOutput}>
       <LogViewer
         key={run}
-        url={`/api/apps/${app.id}/logs/stream?tail=500`}
+        url={`/api/apps/${app.id}/logs/stream`}
         refused={t.app.containerGone}
       />
     </Panel>
@@ -556,6 +557,7 @@ function Settings({ app }: { app: App }) {
           </Button>
         </form>
       </Panel>
+      <EnvironmentSettings key={app.id} app={app} />
       <Panel title={t.app.deleteApp}>
         <div className="flex flex-wrap items-center justify-between gap-3 p-4">
           <p className="max-w-md text-xs text-muted">

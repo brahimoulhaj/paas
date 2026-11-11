@@ -12,6 +12,7 @@ const time = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-di
  */
 export function LogViewer({ url, refused }: { url: string | null; refused?: string }) {
   const t = useT()
+  const [limit, setLimit] = useState(100)
   const { lines, state, end, reconnect } = useLogStream(url)
   const [follow, setFollow] = useState(true)
   const [wrap, setWrap] = useState(true)
@@ -19,7 +20,7 @@ export function LogViewer({ url, refused }: { url: string | null; refused?: stri
   const [frozen, setFrozen] = useState<LogLine[] | null>(null) // the snapshot shown while paused
   const box = useRef<HTMLDivElement>(null)
 
-  const shown = frozen ?? lines
+  const shown = useMemo(() => (frozen ?? lines).slice(-limit), [frozen, lines, limit])
   const needle = query.trim().toLowerCase()
   const visible = useMemo(
     () => (needle ? shown.filter((l) => l.text.toLowerCase().includes(needle)) : shown),
@@ -56,6 +57,10 @@ export function LogViewer({ url, refused }: { url: string | null; refused?: stri
           onChange={(e) => setQuery(e.target.value)}
           className="h-8 min-w-0 flex-1 basis-40 border border-line bg-bg px-2 text-xs text-fg placeholder:text-muted/60 focus:border-accent focus:outline-none"
         />
+        <select aria-label={t.logviewer.lineLimit} value={limit} onChange={(e) => setLimit(Number(e.target.value))}
+          className="h-8 border border-line bg-bg px-2 text-xs text-fg">
+          {[100, 1000, 5000].map((n) => <option key={n} value={n}>{t.logviewer.lastLines(n)}</option>)}
+        </select>
         <Toggle on={follow} onClick={() => setFollow(!follow)} title={t.logviewer.followTitle}>
           {t.logviewer.follow}
         </Toggle>

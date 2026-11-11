@@ -174,3 +174,35 @@ func TestEvents(t *testing.T) {
 		t.Fatalf("limit ignored: %d", len(list))
 	}
 }
+
+func TestAppEnvironmentRoundTrip(t *testing.T) {
+	s, ctx := open(t), context.Background()
+	p, err := s.CreateProject(ctx, "Environment", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in := AppInput{Name: "web", Image: "nginx:1", Port: 80, Environment: map[string]string{"TOKEN": "secret=with#symbols", "EMPTY": "", "MULTILINE": "one\ntwo"}}
+	a, err := s.CreateApp(ctx, p.ID, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err = s.GetApp(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range in.Environment {
+		if a.Environment[k] != v {
+			t.Fatalf("variable %s did not round-trip", k)
+		}
+	}
+	in.Environment = map[string]string{"NEW": "value"}
+	a, err = s.UpdateApp(ctx, a.ID, in)
+	if err != nil || len(a.Environment) != 1 || a.Environment["NEW"] != "value" {
+		t.Fatalf("replace: %v", err)
+	}
+	in.Environment = map[string]string{}
+	a, err = s.UpdateApp(ctx, a.ID, in)
+	if err != nil || len(a.Environment) != 0 {
+		t.Fatalf("clear: %v", err)
+	}
+}

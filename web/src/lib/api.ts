@@ -65,6 +65,7 @@ export type Project = {
 }
 
 export type App = {
+  environment: Record<string, string>
   id: string
   project_id: string
   name: string
@@ -154,7 +155,7 @@ export type SourceInput =
       dockerfile_path: string
     }
 
-export type AppInput = SourceInput & { name: string; port: number; cpu_limit: number; memory_limit_mb: number }
+export type AppInput = SourceInput & { environment?: Record<string, string>; name: string; port: number; cpu_limit: number; memory_limit_mb: number }
 
 export const isActive = (d: Deployment) => d.status === 'queued' || d.status === 'running'
 

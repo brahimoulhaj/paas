@@ -397,3 +397,36 @@ func TestGitAppsAPI(t *testing.T) {
 		t.Errorf("after switch to image = %v", a)
 	}
 }
+
+func TestAppEnvironment(t *testing.T) {
+	e := newEnv(t)
+	e.signIn()
+	pid := e.must(201, "POST", "/api/projects", map[string]any{"name": "Environment"})["id"].(string)
+	values := map[string]string{"TOKEN": "secret=with#symbols", "EMPTY": "", "MULTILINE": "first\nsecond"}
+	a := e.must(201, "POST", "/api/projects/"+pid+"/apps", map[string]any{"name": "env", "image": "nginx:1", "port": 80, "environment": values})
+	path := "/api/apps/" + a["id"].(string)
+	check := func(a map[string]any) {
+		t.Helper()
+		got := a["environment"].(map[string]any)
+		for k, v := range values {
+			if got[k] != v {
+				t.Fatalf("environment %s did not round-trip", k)
+			}
+		}
+	}
+	check(e.must(200, "GET", path, nil))
+	check(e.must(200, "PATCH", path, map[string]any{"port": 8080}))
+	for _, bad := range []map[string]string{{"1BAD": "x"}, {"BAD-NAME": "x"}, {"VALID": "x\x00y"}} {
+		e.must(422, "PATCH", path, map[string]any{"environment": bad})
+	}
+	check(e.must(200, "GET", path, nil))
+	cleared := e.must(200, "PATCH", path, map[string]any{"environment": map[string]string{}})
+	if len(cleared["environment"].(map[string]any)) != 0 {
+		t.Fatal("variables were not cleared")
+	}
+	for _, ev := range e.list("/api/events") {
+		if strings.Contains(ev["detail"].(string), "secret=with#symbols") {
+			t.Fatal("secret in audit log")
+		}
+	}
+}

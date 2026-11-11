@@ -1,6 +1,18 @@
 // Texts of the app page: header, overview, deployments, logs, domains and settings.
 
 export const en = {
+  environment: "Environment variables",
+  environmentHint: "Runtime variables apply on the next deployment.",
+  environmentFields: "Individual fields",
+  environmentBulk: "Bulk editor",
+  environmentFormat: "One KEY=value per line. Blank lines and # comments are ignored. Double-quoted values use JSON escapes. No variable expansion.",
+  environmentEmpty: "No environment variables yet.",
+  environmentKey: "Name",
+  environmentValue: "Value",
+  environmentRemove: "Remove",
+  environmentAdd: "Add variable",
+  environmentInvalid: "Check variable names, duplicate names, and KEY=value syntax.",
+
   back: (name: string) => `← ${name}`,
   project: 'Project',
   whatApp: 'app',
@@ -86,6 +98,18 @@ export const en = {
 }
 
 export const fr: typeof en = {
+  environment: "Variables d’environnement",
+  environmentHint: "Les variables sont appliquées au prochain déploiement.",
+  environmentFields: "Champs individuels",
+  environmentBulk: "Éditeur en bloc",
+  environmentFormat: "Une entrée CLÉ=valeur par ligne. Lignes vides et commentaires # ignorés. Les guillemets doubles utilisent les échappements JSON. Aucune interpolation.",
+  environmentEmpty: "Aucune variable pour le moment.",
+  environmentKey: "Nom",
+  environmentValue: "Valeur",
+  environmentRemove: "Supprimer",
+  environmentAdd: "Ajouter une variable",
+  environmentInvalid: "Vérifiez les noms, les doublons et la syntaxe CLÉ=valeur.",
+
   back: (name) => `← ${name}`,
   project: 'Projet',
   whatApp: 'application',
@@ -173,6 +197,18 @@ export const fr: typeof en = {
 }
 
 export const ar: typeof en = {
+  environment: "متغيرات البيئة",
+  environmentHint: "تُطبّق المتغيرات عند النشر التالي.",
+  environmentFields: "حقول منفردة",
+  environmentBulk: "محرر جماعي",
+  environmentFormat: "متغير KEY=value في كل سطر. تُتجاهل الأسطر الفارغة وتعليقات #. القيم بين علامتي اقتباس تستخدم صيغة JSON. لا يتم توسيع المتغيرات.",
+  environmentEmpty: "لا توجد متغيرات بعد.",
+  environmentKey: "الاسم",
+  environmentValue: "القيمة",
+  environmentRemove: "حذف",
+  environmentAdd: "إضافة متغير",
+  environmentInvalid: "تحقق من الأسماء المكررة وصحة الأسماء وصيغة KEY=value.",
+
   back: (name) => `→ ${name}`,
   project: 'المشروع',
   whatApp: 'التطبيق',
@@ -258,6 +294,18 @@ export const ar: typeof en = {
 }
 
 export const es: typeof en = {
+  environment: "Variables de entorno",
+  environmentHint: "Las variables se aplican en el próximo despliegue.",
+  environmentFields: "Campos individuales",
+  environmentBulk: "Editor en bloque",
+  environmentFormat: "Una entrada CLAVE=valor por línea. Se ignoran líneas vacías y comentarios #. Las comillas dobles usan escapes JSON. Sin expansión de variables.",
+  environmentEmpty: "Aún no hay variables.",
+  environmentKey: "Nombre",
+  environmentValue: "Valor",
+  environmentRemove: "Eliminar",
+  environmentAdd: "Añadir variable",
+  environmentInvalid: "Comprueba nombres, duplicados y la sintaxis CLAVE=valor.",
+
   back: (name) => `← ${name}`,
   project: 'Proyecto',
   whatApp: 'aplicación',
