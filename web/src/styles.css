@@ -26,6 +26,11 @@
   --radius-xl: 0;
 }
 
+/* Other themes override these tokens inline on <html>; see lib/theme.ts. */
+:root {
+  color-scheme: dark;
+}
+
 html,
 body,
 #root {

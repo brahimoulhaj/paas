@@ -2,6 +2,7 @@ import '@fontsource/jetbrains-mono/400.css'
 import '@fontsource/jetbrains-mono/500.css'
 import '@fontsource/silkscreen/400.css'
 import './styles.css'
+import './lib/theme' // applies the saved theme before the first render
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider } from '@tanstack/react-router'
