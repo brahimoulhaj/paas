@@ -6,6 +6,21 @@ state, Docker for workloads and Caddy in front. "Berth" is a working name held i
 
 Progress is tracked in [Roadmap.md](Roadmap.md).
 
+## Install
+
+On a fresh Ubuntu or Debian server (amd64 or arm64) with ports 80 and 443 open:
+
+```sh
+curl -fsSL https://github.com/brahimoulhaj/paas/releases/latest/download/install.sh | sudo sh
+```
+
+It installs Docker if needed, starts the panel and prints a one-time setup link
+(`http://<server-ip>/setup?token=…`). Options go between `sudo` and `sh`, e.g.
+`… | sudo BERTH_PUBLIC_URL=http://203.0.113.10 sh`. A specific version:
+`https://github.com/brahimoulhaj/paas/releases/download/v0.1.1/install.sh`.
+
+Later versions install from the panel: Settings → Updates.
+
 ## Requirements
 
 Go 1.26+, Node 22+, pnpm 10+, and a running Docker daemon (the panel starts without one, but
