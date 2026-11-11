@@ -60,6 +60,7 @@ func toProjectJSON(p store.Project) projectJSON {
 }
 
 type appJSON struct {
+	Mounts              []store.AppMount  `json:"mounts"`
 	Environment         map[string]string `json:"environment"`
 	ID                  string            `json:"id"`
 	ProjectID           string            `json:"project_id"`
@@ -84,6 +85,7 @@ type appJSON struct {
 
 func toAppJSON(a store.App) appJSON {
 	return appJSON{
+		Mounts:      a.Mounts,
 		Environment: a.Environment,
 		ID:          a.ID, ProjectID: a.ProjectID, Name: a.Name, SourceType: a.SourceType, Image: a.Image, Port: a.Port,
 		CPULimit: a.CPULimit, MemoryLimitMB: a.MemoryMB, DesiredState: a.DesiredState,
@@ -303,6 +305,7 @@ func (s *Server) handleDeleteProject(w http.ResponseWriter, r *http.Request) {
 // appFields is the JSON of the settable app fields. Every field is optional: a create
 // starts from defaults, an update from the app as it is.
 type appFields struct {
+	Mounts         *[]store.AppMount  `json:"mounts"`
 	Environment    *map[string]string `json:"environment"`
 	Name           *string            `json:"name"`
 	SourceType     *string            `json:"source_type"`
@@ -327,6 +330,9 @@ func (f appFields) apply(in store.AppInput) store.AppInput {
 	}
 	if f.Environment != nil {
 		in.Environment = *f.Environment
+	}
+	if f.Mounts != nil {
+		in.Mounts = *f.Mounts
 	}
 	str(&in.Name, f.Name)
 	str(&in.SourceType, f.SourceType)
@@ -396,6 +402,10 @@ func validGitURL(raw string) bool {
 var environmentNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func validApp(w http.ResponseWriter, in store.AppInput) bool {
+	if err := store.ValidateAppMounts(in.Mounts); err != nil {
+		invalid(w, err.Error())
+		return false
+	}
 	if len(in.Environment) > 500 {
 		invalid(w, "at most 500 environment variables are allowed")
 		return false
@@ -502,7 +512,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input := in.apply(store.AppInput{
-		Environment: a.Environment, Name: a.Name, SourceType: a.SourceType, Image: a.Image, Git: a.Git,
+		Mounts: a.Mounts, Environment: a.Environment, Name: a.Name, SourceType: a.SourceType, Image: a.Image, Git: a.Git,
 		Port: a.Port, CPULimit: a.CPULimit, MemoryMB: a.MemoryMB,
 	})
 	if !validApp(w, input) || !s.validGitSource(w, r, input) {

@@ -1,3 +1,4 @@
+import { MountSettings } from '../components/mounts'
 import { EnvironmentSettings } from '../components/environment'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
@@ -558,6 +559,7 @@ function Settings({ app }: { app: App }) {
         </form>
       </Panel>
       <EnvironmentSettings key={app.id} app={app} />
+      <MountSettings key={`mounts-${app.id}`} app={app} />
       <Panel title={t.app.deleteApp}>
         <div className="flex flex-wrap items-center justify-between gap-3 p-4">
           <p className="max-w-md text-xs text-muted">

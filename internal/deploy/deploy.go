@@ -49,13 +49,14 @@ type GitAuth interface {
 }
 
 type Options struct {
-	Store    *store.Store
-	Executor executor.Executor
-	Router   Router  // nil: no proxy, routes are not touched
-	Builder  Builder // nil: Git apps cannot be deployed
-	GitAuth  GitAuth // nil: only public repositories
-	DataDir  string  // deployment logs live in <DataDir>/deployments, build workspaces in <DataDir>/builds
-	Log      *slog.Logger
+	DataVolume string
+	Store      *store.Store
+	Executor   executor.Executor
+	Router     Router  // nil: no proxy, routes are not touched
+	Builder    Builder // nil: Git apps cannot be deployed
+	GitAuth    GitAuth // nil: only public repositories
+	DataDir    string  // deployment logs live in <DataDir>/deployments, build workspaces in <DataDir>/builds
+	Log        *slog.Logger
 	// StartGrace is how long a new container must stay up before traffic is switched to
 	// it. It catches images that crash on start; real health checks replace it later.
 	StartGrace time.Duration
@@ -189,6 +190,11 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 	}
 
 	// 2. Create and start the new container next to the old one.
+	mounts, err := s.prepareMounts(app, dep)
+	if err != nil {
+		fail("", err)
+		return
+	}
 	name := containerName(app.ID, dep.ID)
 	logw.printf("Creating container %s", name)
 	containerID, err := ex.CreateContainer(ctx, executor.ContainerSpec{
@@ -200,6 +206,7 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 		CPUs:       app.CPULimit,
 		MemoryMB:   app.MemoryMB,
 		Env:        app.Environment,
+		Mounts:     mounts,
 	})
 	if err != nil {
 		fail("", err)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -174,6 +175,20 @@ func (d *Docker) CreateContainer(ctx context.Context, spec ContainerSpec) (strin
 	binds := make([]string, 0, len(spec.Mounts))
 	var volumes []mount.Mount
 	for _, m := range spec.Mounts {
+		if m.VolumeFile {
+			if m.Volume == "" || m.SubPath == "" || filepath.IsAbs(m.SubPath) || strings.Contains(m.SubPath, "..") {
+				return "", errors.New("invalid managed file mount")
+			}
+			v, err := d.cli.VolumeInspect(ctx, m.Volume, client.VolumeInspectOptions{})
+			if err != nil {
+				return "", fmt.Errorf("inspect file storage volume: %w", err)
+			}
+			if v.Volume.Mountpoint == "" {
+				return "", errors.New("file storage volume has no host mountpoint")
+			}
+			m.Source = filepath.Join(v.Volume.Mountpoint, m.SubPath)
+			m.Volume, m.SubPath = "", ""
+		}
 		if !strings.HasPrefix(m.Target, "/") || (m.Source == "") == (m.Volume == "") ||
 			(m.SubPath != "" && (m.Volume == "" || strings.HasPrefix(m.SubPath, "/") || strings.Contains(m.SubPath, ".."))) {
 			return "", fmt.Errorf("create container: invalid mount %+v", m)

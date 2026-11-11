@@ -1,6 +1,20 @@
 // Texts of the app page: header, overview, deployments, logs, domains and settings.
 
 export const en = {
+  mountsTitle: "Volumes and mounts",
+  mountsHint: "Changes apply on the next deployment. Bind paths are on the Docker host. Named volumes are retained when a mount or app is removed.",
+  mountsEmpty: "No mounts configured.",
+  mountType: "Type",
+  mountVolume: "Named volume",
+  mountBind: "Bind mount",
+  mountFile: "File",
+  mountTarget: "Container path",
+  mountHostPath: "Docker host path",
+  mountVolumeName: "Volume name",
+  mountContent: "File content",
+  mountReadOnly: "Read only",
+  mountAdd: "Add mount",
+
   environment: "Environment variables",
   environmentHint: "Runtime variables apply on the next deployment.",
   environmentFields: "Individual fields",
@@ -98,6 +112,20 @@ export const en = {
 }
 
 export const fr: typeof en = {
+  mountsTitle: "Volumes et montages",
+  mountsHint: "Appliqués au prochain déploiement. Les chemins hôtes désignent le serveur Docker. Les volumes nommés sont conservés après suppression du montage ou de l’application.",
+  mountsEmpty: "Aucun montage configuré.",
+  mountType: "Type",
+  mountVolume: "Volume nommé",
+  mountBind: "Montage hôte",
+  mountFile: "Fichier",
+  mountTarget: "Chemin du conteneur",
+  mountHostPath: "Chemin sur l’hôte Docker",
+  mountVolumeName: "Nom du volume",
+  mountContent: "Contenu du fichier",
+  mountReadOnly: "Lecture seule",
+  mountAdd: "Ajouter un montage",
+
   environment: "Variables d’environnement",
   environmentHint: "Les variables sont appliquées au prochain déploiement.",
   environmentFields: "Champs individuels",
@@ -197,6 +225,20 @@ export const fr: typeof en = {
 }
 
 export const ar: typeof en = {
+  mountsTitle: "وحدات التخزين والربط",
+  mountsHint: "تُطبّق التغييرات عند النشر التالي. المسارات على مضيف Docker. تُحفظ وحدات التخزين المسماة عند حذف الربط أو التطبيق.",
+  mountsEmpty: "لا توجد إعدادات ربط.",
+  mountType: "النوع",
+  mountVolume: "وحدة تخزين مسماة",
+  mountBind: "ربط مسار المضيف",
+  mountFile: "ملف",
+  mountTarget: "المسار داخل الحاوية",
+  mountHostPath: "مسار مضيف Docker",
+  mountVolumeName: "اسم وحدة التخزين",
+  mountContent: "محتوى الملف",
+  mountReadOnly: "للقراءة فقط",
+  mountAdd: "إضافة ربط",
+
   environment: "متغيرات البيئة",
   environmentHint: "تُطبّق المتغيرات عند النشر التالي.",
   environmentFields: "حقول منفردة",
@@ -294,6 +336,20 @@ export const ar: typeof en = {
 }
 
 export const es: typeof en = {
+  mountsTitle: "Volúmenes y montajes",
+  mountsHint: "Se aplican en el próximo despliegue. Las rutas son del host Docker. Los volúmenes se conservan al eliminar el montaje o la aplicación.",
+  mountsEmpty: "Sin montajes configurados.",
+  mountType: "Tipo",
+  mountVolume: "Volumen con nombre",
+  mountBind: "Montaje del host",
+  mountFile: "Archivo",
+  mountTarget: "Ruta del contenedor",
+  mountHostPath: "Ruta del host Docker",
+  mountVolumeName: "Nombre del volumen",
+  mountContent: "Contenido del archivo",
+  mountReadOnly: "Solo lectura",
+  mountAdd: "Añadir montaje",
+
   environment: "Variables de entorno",
   environmentHint: "Las variables se aplican en el próximo despliegue.",
   environmentFields: "Campos individuales",

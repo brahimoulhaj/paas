@@ -76,11 +76,12 @@ type PortBinding struct {
 
 // Mount attaches a host path, or a folder of a named Docker volume.
 type Mount struct {
-	Source   string // absolute host path; empty when Volume is set
-	Volume   string // named volume; Source must be empty
-	SubPath  string // with Volume: a folder inside the volume (it must exist) instead of its root
-	Target   string
-	ReadOnly bool
+	VolumeFile bool   // resolve SubPath as a file in Volume and bind-mount it
+	Source     string // absolute host path; empty when Volume is set
+	Volume     string // named volume; Source must be empty
+	SubPath    string // with Volume: a folder inside the volume (it must exist) instead of its root
+	Target     string
+	ReadOnly   bool
 }
 
 type RestartPolicy string

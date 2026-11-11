@@ -64,7 +64,10 @@ export type Project = {
   updated_at: string
 }
 
+export type AppMount = { type: 'bind' | 'volume' | 'file'; source: string; target: string; read_only: boolean; content: string }
+
 export type App = {
+  mounts: AppMount[]
   environment: Record<string, string>
   id: string
   project_id: string
