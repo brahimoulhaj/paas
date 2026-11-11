@@ -350,7 +350,7 @@ Goal: see what the server is doing and get told when something breaks.
 - [ ] Security review: socket exposure, secrets at rest, webhook token handling, headers
 - [ ] Panel self-backup (SQLite file + key) and restore procedure
 - [ ] Docs: install, first deploy, backups, updates, recovery CLI
-- [x] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog — push a `vX.Y.Z` tag; `.github/workflows/release.yml` publishes `ghcr.io/brahimoulhaj/paas:X.Y.Z` and `:latest` and a GitHub release with generated notes (v0.1.0 → v0.2.4 published)
+- [x] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog — push a `vX.Y.Z` tag; `.github/workflows/release.yml` publishes `ghcr.io/brahimoulhaj/paas:X.Y.Z` and `:latest` and a GitHub release with generated notes (v0.1.0 → v0.3.0 published)
 
 ## Out of v1
 
