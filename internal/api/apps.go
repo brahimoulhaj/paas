@@ -552,8 +552,16 @@ func (s *Server) handleListDomains(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Hostname string `json:"hostname"`
+		TLSMode  string `json:"tls_mode"` // optional; "auto" (default) or "http_only"
 	}
 	if !readJSON(w, r, &in) {
+		return
+	}
+	if in.TLSMode == "" {
+		in.TLSMode = store.TLSAuto
+	}
+	if !store.ValidTLSMode(in.TLSMode) {
+		invalid(w, `tls_mode must be "auto" or "http_only"`)
 		return
 	}
 	host := strings.ToLower(strings.TrimSpace(in.Hostname))
@@ -574,7 +582,7 @@ func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "conflict", "this hostname is the panel's own domain")
 		return
 	}
-	d, err := s.store.CreateDomain(r.Context(), a.ID, host)
+	d, err := s.store.CreateDomain(r.Context(), a.ID, host, in.TLSMode)
 	if s.storeError(w, "create domain", err, "this hostname is already used by an app") {
 		return
 	}
@@ -585,6 +593,42 @@ func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toDomainJSON(d))
+}
+
+// handleUpdateDomain changes how a domain is served: "auto" (HTTPS with a certificate,
+// HTTP redirected) or "http_only" (plain HTTP, for a CDN that terminates TLS itself).
+func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TLSMode string `json:"tls_mode"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	if !store.ValidTLSMode(in.TLSMode) {
+		invalid(w, `tls_mode must be "auto" or "http_only"`)
+		return
+	}
+	d, err := s.store.GetDomain(r.Context(), r.PathValue("id"))
+	if s.storeError(w, "get domain", err, "") {
+		return
+	}
+	if d.TLSMode != in.TLSMode {
+		if s.storeError(w, "update domain", s.store.SetDomainTLSMode(r.Context(), d.ID, in.TLSMode), "") {
+			return
+		}
+		appName := ""
+		if a, err := s.store.GetApp(r.Context(), d.AppID); err == nil {
+			appName = a.Name
+		}
+		s.audit(r, "domain.tls", "app", d.AppID, appName, d.Hostname+": "+in.TLSMode)
+		if !s.applyProxy(r.Context()) {
+			writeError(w, http.StatusServiceUnavailable, "proxy_unavailable",
+				"saved, but the proxy could not be updated; it is applied when the proxy is back")
+			return
+		}
+		d.TLSMode = in.TLSMode
+	}
+	writeJSON(w, http.StatusOK, toDomainJSON(d))
 }
 
 func (s *Server) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {

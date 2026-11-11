@@ -57,6 +57,11 @@ func (a *Admin) Load(ctx context.Context, config []byte) error {
 // SetUpstreams replaces the upstreams of one route in a single atomic change, leaving
 // every other route untouched. This is the switch at the heart of a zero-downtime deploy.
 func (a *Admin) SetUpstreams(ctx context.Context, routeID string, upstreams []string) error {
+	return a.setUpstreams(ctx, routeKey(routeID), upstreams)
+}
+
+// setUpstreams patches the upstreams of the Caddy route with this @id.
+func (a *Admin) setUpstreams(ctx context.Context, key string, upstreams []string) error {
 	list := make([]object, 0, len(upstreams))
 	for _, u := range upstreams {
 		if err := validUpstream(u); err != nil {
@@ -68,7 +73,7 @@ func (a *Admin) SetUpstreams(ctx context.Context, routeID string, upstreams []st
 	if err != nil {
 		return err
 	}
-	return a.do(ctx, http.MethodPatch, "/id/"+url.PathEscape(routeKey(routeID))+"/handle/0/upstreams", body)
+	return a.do(ctx, http.MethodPatch, "/id/"+url.PathEscape(key)+"/handle/0/upstreams", body)
 }
 
 func (a *Admin) do(ctx context.Context, method, path string, body []byte) error {

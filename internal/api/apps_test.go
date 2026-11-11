@@ -263,6 +263,23 @@ func TestDomainsAPI(t *testing.T) {
 	e.must(409, "POST", domains, map[string]any{"hostname": "shop.example.com"})
 	e.must(409, "POST", "/api/apps/"+other+"/domains", map[string]any{"hostname": "shop.example.com"})
 
+	// TLS mode: HTTP only for a CDN that terminates TLS, switchable both ways.
+	e.must(422, "POST", domains, map[string]any{"hostname": "cf.example.com", "tls_mode": "nope"})
+	cf := e.must(201, "POST", domains, map[string]any{"hostname": "cf.example.com", "tls_mode": "http_only"})
+	if cf["tls_mode"] != "http_only" {
+		t.Fatalf("http-only domain = %v", cf)
+	}
+	modeBase := px.applied
+	e.must(422, "PATCH", "/api/domains/"+cf["id"].(string), map[string]any{"tls_mode": ""})
+	if m := e.must(200, "PATCH", "/api/domains/"+cf["id"].(string), map[string]any{"tls_mode": "auto"}); m["tls_mode"] != "auto" || px.applied != modeBase+1 {
+		t.Fatalf("switch to auto = %v, applied %d", m, px.applied-modeBase)
+	}
+	e.must(200, "PATCH", "/api/domains/"+cf["id"].(string), map[string]any{"tls_mode": "auto"}) // no change, no reload
+	if px.applied != modeBase+1 {
+		t.Fatal("unchanged mode reloaded the proxy")
+	}
+	e.must(204, "DELETE", "/api/domains/"+cf["id"].(string), nil)
+
 	// The panel's domain and app domains exclude each other, both ways.
 	e.must(409, "PUT", "/api/settings/panel", map[string]any{"domain": "shop.example.com"})
 	e.must(200, "PUT", "/api/settings/panel", map[string]any{"domain": "panel.example.com"})

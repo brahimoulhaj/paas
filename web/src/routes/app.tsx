@@ -332,11 +332,16 @@ function Domains({ app }: { app: App }) {
   const queryClient = useQueryClient()
   const domains = useQuery(domainsQuery(app.id))
   const [hostname, setHostname] = useState('')
+  const [httpOnly, setHttpOnly] = useState(false)
   const refresh = () => queryClient.invalidateQueries({ queryKey: domainsQuery(app.id).queryKey })
 
   const add = useMutation({
-    mutationFn: () => api<Domain>(`/apps/${app.id}/domains`, { method: 'POST', body: { hostname } }),
-    onSuccess: () => setHostname(''),
+    mutationFn: () =>
+      api<Domain>(`/apps/${app.id}/domains`, { method: 'POST', body: { hostname, tls_mode: httpOnly ? 'http_only' : 'auto' } }),
+    onSuccess: () => {
+      setHostname('')
+      setHttpOnly(false)
+    },
     onSettled: refresh, // a 503 "saved, proxy not updated" still added the domain
   })
 
@@ -369,10 +374,11 @@ function Domains({ app }: { app: App }) {
             name="hostname"
             required
             placeholder="app.example.com"
-            hint="No scheme, port or path. Plain HTTP requests are redirected to HTTPS."
+            hint={httpOnly ? 'No scheme, port or path. Served over plain HTTP, without a certificate.' : 'No scheme, port or path. Plain HTTP requests are redirected to HTTPS.'}
             value={hostname}
             onChange={(e) => setHostname(e.target.value.trim().toLowerCase())}
           />
+          <HttpOnlyChoice checked={httpOnly} onChange={setHttpOnly} />
           {add.error && <ErrorNote>{add.error.message}</ErrorNote>}
           <Button type="submit" disabled={add.isPending}>
             {add.isPending ? 'Adding…' : 'Add domain'}
@@ -383,25 +389,61 @@ function Domains({ app }: { app: App }) {
   )
 }
 
+/** HTTP-only serving, for a CDN that terminates TLS itself and talks HTTP to this server. */
+function HttpOnlyChoice({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex cursor-pointer items-start gap-3 text-sm">
+      <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span>
+        HTTP only
+        <span className="block text-xs text-muted">
+          For a CDN that handles HTTPS and talks plain HTTP to this server, like Cloudflare with SSL set to Flexible. No
+          certificate here and no redirect, which would otherwise loop. Leave off unless you need it.
+        </span>
+      </span>
+    </label>
+  )
+}
+
 function DomainRow({ domain, onRemoved }: { domain: Domain; onRemoved: () => void }) {
   const dns = useQuery(dnsQuery(domain.id))
   const remove = useMutation({
     mutationFn: () => api<void>(`/domains/${domain.id}`, { method: 'DELETE' }),
     onSuccess: onRemoved,
   })
+  const httpOnly = domain.tls_mode === 'http_only'
+  const setMode = useMutation({
+    mutationFn: (tls_mode: string) => api<Domain>(`/domains/${domain.id}`, { method: 'PATCH', body: { tls_mode } }),
+    onSettled: onRemoved, // refreshes the list
+  })
 
   return (
     <li className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3">
       <div className="min-w-0">
-        <a href={`https://${domain.hostname}`} target="_blank" rel="noreferrer" className="text-sm [overflow-wrap:anywhere] text-accent hover:underline">
-          {domain.hostname}
-        </a>
+        <p className="flex flex-wrap items-center gap-2">
+          <a href={`https://${domain.hostname}`} target="_blank" rel="noreferrer" className="text-sm [overflow-wrap:anywhere] text-accent hover:underline">
+            {domain.hostname}
+          </a>
+          {httpOnly && <Badge tone="muted">http only</Badge>}
+        </p>
         <p className="text-xs text-muted">
           <DnsHintText dns={dns} />
         </p>
         {remove.error && <p className="text-xs text-danger">{remove.error.message}</p>}
+        {setMode.error && <p className="text-xs text-danger">{setMode.error.message}</p>}
       </div>
-      <ConfirmButton label="Remove" confirm="Yes, remove" pending={remove.isPending} onConfirm={() => remove.mutate()} />
+      <span className="flex flex-wrap items-center gap-2">
+        <Button
+          variant="ghost"
+          type="button"
+          disabled={setMode.isPending}
+          title={httpOnly ? 'Get a certificate here and redirect HTTP to HTTPS' : 'Serve over plain HTTP, for a CDN that handles HTTPS'}
+          onClick={() => setMode.mutate(httpOnly ? 'auto' : 'http_only')}
+        >
+          {setMode.isPending ? 'Saving…' : httpOnly ? 'Use HTTPS' : 'HTTP only'}
+        </Button>
+        <ConfirmButton label="Remove" confirm="Yes, remove" pending={remove.isPending} onConfirm={() => remove.mutate()} />
+      </span>
     </li>
   )
 }

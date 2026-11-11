@@ -57,6 +57,7 @@ const actions: Record<string, string> = {
   'app.restart': 'restarted',
   'domain.add': 'added a domain to',
   'domain.remove': 'removed a domain from',
+  'domain.tls': 'changed how a domain is served for',
   'deployment.succeeded': 'deployed',
   'deployment.failed': 'failed to deploy',
   'settings.panel': 'changed the panel domain',

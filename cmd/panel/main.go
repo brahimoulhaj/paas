@@ -293,7 +293,7 @@ func proxySource(st *store.Store) func(context.Context) (proxy.Config, error) {
 		}
 		cfg := proxy.Config{PanelDomain: domain, ACMEEmail: email}
 		for _, r := range routes {
-			route := proxy.Route{ID: r.AppID, Hosts: r.Hosts}
+			route := proxy.Route{ID: r.AppID, Hosts: r.Hosts, HTTPOnly: r.HTTPOnly}
 			if r.Upstream != "" {
 				route.Upstreams = []string{r.Upstream}
 			}

@@ -22,12 +22,50 @@ type Config struct {
 	Routes        []Route // one per app (or built-in service) that has domains
 }
 
-// Route sends requests for a set of hostnames to a set of upstreams over HTTPS with an
-// automatic certificate; plain HTTP requests for those hostnames are redirected.
+// Route sends requests for a set of hostnames to a set of upstreams. By default a host is
+// served over HTTPS with an automatic certificate and plain HTTP is redirected to it. Hosts
+// listed in HTTPOnly are served over plain HTTP instead, with no certificate and no
+// redirect: for a CDN that terminates TLS itself and talks HTTP to the origin (Cloudflare's
+// "Flexible" SSL), where a redirect to HTTPS would loop.
 type Route struct {
 	ID        string   // stable id, e.g. the app id; addresses the route in the admin API
 	Hosts     []string // hostnames, lowercase
+	HTTPOnly  []string // subset of Hosts served over plain HTTP only
 	Upstreams []string // host:port on the shared network; empty answers 503
+}
+
+// split returns the hosts served over HTTPS and those served over plain HTTP.
+func (r Route) split() (tls, plain []string) {
+	for _, h := range r.Hosts {
+		if contains(r.HTTPOnly, h) {
+			plain = append(plain, h)
+		} else {
+			tls = append(tls, h)
+		}
+	}
+	return tls, plain
+}
+
+// keys are the admin API ids of the Caddy routes this route turns into.
+func (r Route) keys() []string {
+	tls, plain := r.split()
+	var keys []string
+	if len(tls) > 0 {
+		keys = append(keys, routeKey(r.ID))
+	}
+	if len(plain) > 0 {
+		keys = append(keys, httpRouteKey(r.ID))
+	}
+	return keys
+}
+
+func contains(list []string, v string) bool {
+	for _, x := range list {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 // Ports Caddy listens on inside its container. The host ports they are published on are
@@ -39,14 +77,16 @@ const (
 
 type object = map[string]any
 
-func routeKey(id string) string { return "route-" + id }
+func routeKey(id string) string     { return "route-" + id }
+func httpRouteKey(id string) string { return "route-" + id + "-http" }
 
 // Build returns the complete Caddy JSON configuration for c.
 //
 // Layout: an "https" server holds one route per hostname group; an "http" server redirects
-// those hostnames to HTTPS and sends everything else to the panel, which is what makes
-// http://<server-ip> work on a fresh install. Certificates come from Caddy's automatic
-// HTTPS, driven by the host matchers on the "https" server.
+// those hostnames to HTTPS, proxies HTTP-only hostnames directly, and sends everything else
+// to the panel, which is what makes http://<server-ip> work on a fresh install.
+// Certificates come from Caddy's automatic HTTPS, driven by the host matchers on the
+// "https" server only, so HTTP-only hostnames never get one.
 func Build(c Config) ([]byte, error) {
 	if c.AdminListen == "" {
 		return nil, errors.New("proxy config: admin listen address is required")
@@ -86,6 +126,11 @@ func Build(c Config) ([]byte, error) {
 			}
 			seenHost[h] = r.ID
 		}
+		for _, h := range r.HTTPOnly {
+			if !contains(r.Hosts, h) {
+				return nil, fmt.Errorf("proxy config: route %s: http-only host %s is not one of its hosts", r.ID, h)
+			}
+		}
 		upstreams := make([]object, 0, len(r.Upstreams))
 		for _, u := range r.Upstreams {
 			if err := validUpstream(u); err != nil {
@@ -93,22 +138,34 @@ func Build(c Config) ([]byte, error) {
 			}
 			upstreams = append(upstreams, object{"dial": u})
 		}
-		allHosts = append(allHosts, r.Hosts...)
-		httpsRoutes = append(httpsRoutes, object{
-			"@id":      routeKey(r.ID),
-			"match":    []object{{"host": r.Hosts}},
-			"handle":   []object{{"handler": "reverse_proxy", "upstreams": upstreams}},
-			"terminal": true,
-		})
-		httpRoutes = append(httpRoutes, object{
-			"match": []object{{"host": r.Hosts}},
-			"handle": []object{{
-				"handler":     "static_response",
-				"status_code": 308,
-				"headers":     object{"Location": []string{"https://{http.request.host}{http.request.uri}"}},
-			}},
-			"terminal": true,
-		})
+		tlsHosts, plainHosts := r.split()
+		proxyTo := []object{{"handler": "reverse_proxy", "upstreams": upstreams}}
+		if len(tlsHosts) > 0 {
+			allHosts = append(allHosts, tlsHosts...)
+			httpsRoutes = append(httpsRoutes, object{
+				"@id":      routeKey(r.ID),
+				"match":    []object{{"host": tlsHosts}},
+				"handle":   proxyTo,
+				"terminal": true,
+			})
+			httpRoutes = append(httpRoutes, object{
+				"match": []object{{"host": tlsHosts}},
+				"handle": []object{{
+					"handler":     "static_response",
+					"status_code": 308,
+					"headers":     object{"Location": []string{"https://{http.request.host}{http.request.uri}"}},
+				}},
+				"terminal": true,
+			})
+		}
+		if len(plainHosts) > 0 {
+			httpRoutes = append(httpRoutes, object{
+				"@id":      httpRouteKey(r.ID),
+				"match":    []object{{"host": plainHosts}},
+				"handle":   []object{{"handler": "reverse_proxy", "upstreams": upstreams}},
+				"terminal": true,
+			})
+		}
 	}
 
 	// Last on the HTTP server: anything that is not a known hostname reaches the panel.

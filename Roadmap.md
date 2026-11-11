@@ -229,7 +229,7 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 - [ ] Auto-deploy toggle per app; regenerate deploy token
 
 ### TLS modes
-- [ ] `http_only` (behind Cloudflare proxy)
+- [x] `http_only` (behind Cloudflare proxy) — per domain, chosen when adding it or switched later (`PATCH /api/domains/{id}`); served on :80 with no certificate and no redirect; verified against Caddy in dev (2026-11-11)
 - [ ] `dns01` (wildcards; provider credentials)
 - [ ] `custom` — upload certificate and key, expiry tracking
 - [ ] Domain redirects (`redirect_to`), www / apex

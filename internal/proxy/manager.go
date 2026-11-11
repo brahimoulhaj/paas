@@ -172,8 +172,11 @@ func (m *Manager) SetUpstreams(ctx context.Context, routeID string, upstreams []
 	if idx < 0 {
 		return fmt.Errorf("proxy: no route %q in the running configuration", routeID)
 	}
-	if err := m.admin.SetUpstreams(ctx, routeID, upstreams); err != nil {
-		return err
+	// A route with both HTTPS and HTTP-only hosts is two Caddy routes; switch both.
+	for _, key := range m.last.Routes[idx].keys() {
+		if err := m.admin.setUpstreams(ctx, key, upstreams); err != nil {
+			return err
+		}
 	}
 	// Keep the boot file in step with what Caddy now runs.
 	next := m.last

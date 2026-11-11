@@ -52,14 +52,14 @@ func TestProjectsAppsDomains(t *testing.T) {
 	}
 
 	// Domains: unique panel-wide.
-	d, err := s.CreateDomain(ctx, a.ID, "shop.example.com")
+	d, err := s.CreateDomain(ctx, a.ID, "shop.example.com", "")
 	if err != nil || d.TLSMode != "auto" {
 		t.Fatalf("create domain = %+v, %v", d, err)
 	}
-	if _, err := s.CreateDomain(ctx, b.ID, "shop.example.com"); !errors.Is(err, ErrConflict) {
+	if _, err := s.CreateDomain(ctx, b.ID, "shop.example.com", ""); !errors.Is(err, ErrConflict) {
 		t.Fatalf("hostname reuse across apps = %v", err)
 	}
-	if _, err := s.CreateDomain(ctx, a.ID, "www.shop.example.com"); err != nil {
+	if _, err := s.CreateDomain(ctx, a.ID, "www.shop.example.com", ""); err != nil {
 		t.Fatal(err)
 	}
 	if ok, _ := s.DomainExists(ctx, "shop.example.com"); !ok {

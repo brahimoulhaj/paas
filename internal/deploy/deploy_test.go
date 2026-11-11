@@ -125,7 +125,7 @@ func (e *env) setImage(image string) {
 
 func TestDeployReplacesContainer(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
-	if _, err := e.st.CreateDomain(ctx, e.app.ID, "shop.example.com"); err != nil {
+	if _, err := e.st.CreateDomain(ctx, e.app.ID, "shop.example.com", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -187,7 +187,7 @@ func TestDeployReplacesContainer(t *testing.T) {
 
 func TestDeployFailureKeepsOldContainer(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
-	if _, err := e.st.CreateDomain(ctx, e.app.ID, "shop.example.com"); err != nil {
+	if _, err := e.st.CreateDomain(ctx, e.app.ID, "shop.example.com", ""); err != nil {
 		t.Fatal(err)
 	}
 	e.router.known[e.app.ID] = true
@@ -275,7 +275,7 @@ func TestOneOperationPerApp(t *testing.T) {
 
 func TestStopStartRestart(t *testing.T) {
 	e, ctx := newEnv(t), context.Background()
-	if _, err := e.st.CreateDomain(ctx, e.app.ID, "shop.example.com"); err != nil {
+	if _, err := e.st.CreateDomain(ctx, e.app.ID, "shop.example.com", ""); err != nil {
 		t.Fatal(err)
 	}
 	e.router.known[e.app.ID] = true

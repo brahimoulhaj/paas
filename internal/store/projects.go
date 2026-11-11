@@ -249,12 +249,24 @@ func scanDomain(row scanner) (Domain, error) {
 	return d, err
 }
 
+// TLS modes of a domain.
+const (
+	TLSAuto     = "auto"      // HTTPS with an automatic certificate; HTTP redirects to it
+	TLSHTTPOnly = "http_only" // plain HTTP only, for a CDN that terminates TLS (Cloudflare Flexible)
+)
+
+// ValidTLSMode reports whether m is a TLS mode the proxy implements.
+func ValidTLSMode(m string) bool { return m == TLSAuto || m == TLSHTTPOnly }
+
 // CreateDomain returns ErrConflict when the hostname is already taken by any app.
-func (s *Store) CreateDomain(ctx context.Context, appID, hostname string) (Domain, error) {
+func (s *Store) CreateDomain(ctx context.Context, appID, hostname, tlsMode string) (Domain, error) {
+	if tlsMode == "" {
+		tlsMode = TLSAuto
+	}
 	did, ts := id.New(), now()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO domains (id, app_id, hostname, tls_mode, created_at, updated_at) VALUES (?, ?, ?, 'auto', ?, ?)`,
-		did, appID, hostname, ts, ts)
+		`INSERT INTO domains (id, app_id, hostname, tls_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		did, appID, hostname, tlsMode, ts, ts)
 	if err != nil {
 		return Domain{}, conflict(err)
 	}
@@ -288,6 +300,10 @@ func (s *Store) ListDomains(ctx context.Context, appID string) ([]Domain, error)
 	return out, rows.Err()
 }
 
+func (s *Store) SetDomainTLSMode(ctx context.Context, domainID, tlsMode string) error {
+	return affected(s.db.ExecContext(ctx, `UPDATE domains SET tls_mode = ?, updated_at = ? WHERE id = ?`, tlsMode, now(), domainID))
+}
+
 func (s *Store) DeleteDomain(ctx context.Context, domainID string) error {
 	return affected(s.db.ExecContext(ctx, `DELETE FROM domains WHERE id = ?`, domainID))
 }
@@ -296,13 +312,14 @@ func (s *Store) DeleteDomain(ctx context.Context, domainID string) error {
 type ProxyRoute struct {
 	AppID    string
 	Hosts    []string
-	Upstream string // container:port; empty when the app is stopped or was never deployed
+	HTTPOnly []string // hosts served over plain HTTP only
+	Upstream string   // container:port; empty when the app is stopped or was never deployed
 }
 
 // ProxyRoutes is what the proxy configuration is built from.
 func (s *Store) ProxyRoutes(ctx context.Context) ([]ProxyRoute, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT a.id, COALESCE(d.port, 0), a.desired_state, COALESCE(d.container_name, ''), dm.hostname
+		SELECT a.id, COALESCE(d.port, 0), a.desired_state, COALESCE(d.container_name, ''), dm.hostname, dm.tls_mode
 		FROM domains dm
 		JOIN apps a ON a.id = dm.app_id
 		LEFT JOIN deployments d ON d.id = a.current_deployment_id
@@ -313,9 +330,9 @@ func (s *Store) ProxyRoutes(ctx context.Context) ([]ProxyRoute, error) {
 	defer rows.Close()
 	var out []ProxyRoute
 	for rows.Next() {
-		var appID, state, container, host string
+		var appID, state, container, host, mode string
 		var port int
-		if err := rows.Scan(&appID, &port, &state, &container, &host); err != nil {
+		if err := rows.Scan(&appID, &port, &state, &container, &host, &mode); err != nil {
 			return nil, err
 		}
 		if len(out) == 0 || out[len(out)-1].AppID != appID {
@@ -326,6 +343,9 @@ func (s *Store) ProxyRoutes(ctx context.Context) ([]ProxyRoute, error) {
 			out = append(out, r)
 		}
 		out[len(out)-1].Hosts = append(out[len(out)-1].Hosts, host)
+		if mode == TLSHTTPOnly {
+			out[len(out)-1].HTTPOnly = append(out[len(out)-1].HTTPOnly, host)
+		}
 	}
 	return out, rows.Err()
 }

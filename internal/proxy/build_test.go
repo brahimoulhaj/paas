@@ -174,3 +174,65 @@ func TestValidHost(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildHTTPOnlyHosts(t *testing.T) {
+	cfg := build(t, Config{
+		AdminListen:   "localhost:2019",
+		PanelUpstream: "berth:8080",
+		ACMEEmail:     "ops@example.com",
+		Routes: []Route{
+			{ID: "app1", Hosts: []string{"secure.example.com", "flex.example.com"}, HTTPOnly: []string{"flex.example.com"}, Upstreams: []string{"app-1:80"}},
+			{ID: "app2", Hosts: []string{"cf.example.com"}, HTTPOnly: []string{"cf.example.com"}, Upstreams: []string{"app-2:80"}},
+		},
+	})
+	raw, _ := json.Marshal(cfg)
+	s := string(raw)
+
+	https := dig(t, cfg, "apps", "http", "servers", "https", "routes").([]any)
+	if len(https) != 1 {
+		t.Fatalf("https routes = %d, want only app1's TLS host", len(https))
+	}
+	if hosts := dig(t, https[0], "match", 0, "host").([]any); len(hosts) != 1 || hosts[0] != "secure.example.com" {
+		t.Fatalf("https hosts = %v", hosts)
+	}
+
+	// HTTP server: app1 redirect, app1 plain proxy, app2 plain proxy, panel catch-all.
+	httpRoutes := dig(t, cfg, "apps", "http", "servers", "http", "routes").([]any)
+	if len(httpRoutes) != 4 {
+		t.Fatalf("http routes = %d: %s", len(httpRoutes), s)
+	}
+	byID := map[string]any{}
+	for _, r := range httpRoutes {
+		if id, ok := r.(map[string]any)["@id"].(string); ok {
+			byID[id] = r
+		}
+	}
+	for id, host := range map[string]string{"route-app1-http": "flex.example.com", "route-app2-http": "cf.example.com"} {
+		r, ok := byID[id]
+		if !ok {
+			t.Fatalf("missing %s: %s", id, s)
+		}
+		if h := dig(t, r, "match", 0, "host", 0); h != host {
+			t.Fatalf("%s host = %v", id, h)
+		}
+		if dig(t, r, "handle", 0, "handler") != "reverse_proxy" {
+			t.Fatalf("%s is not a proxy", id)
+		}
+	}
+	// No redirect for the HTTP-only hosts, so a CDN talking HTTP to the origin cannot loop.
+	if strings.Count(s, `"status_code":308`) != 1 {
+		t.Fatalf("want exactly one redirect (secure.example.com): %s", s)
+	}
+
+	// Everything HTTP-only: no HTTPS server at all, so Caddy asks for no certificate.
+	only := build(t, Config{AdminListen: "localhost:2019", PanelUpstream: "berth:8080",
+		Routes: []Route{{ID: "a", Hosts: []string{"cf.example.com"}, HTTPOnly: []string{"cf.example.com"}}}})
+	if _, has := dig(t, only, "apps", "http", "servers").(map[string]any)["https"]; has {
+		t.Fatal("https server built for HTTP-only hosts")
+	}
+
+	if _, err := Build(Config{AdminListen: "x:1", PanelUpstream: "berth:8080",
+		Routes: []Route{{ID: "a", Hosts: []string{"a.example.com"}, HTTPOnly: []string{"b.example.com"}}}}); err == nil {
+		t.Fatal("http-only host outside the route's hosts accepted")
+	}
+}
