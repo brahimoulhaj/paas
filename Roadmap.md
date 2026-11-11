@@ -1,0 +1,365 @@
+# Berth — Roadmap
+
+Implementation tracker for the single-node PaaS panel. Source of truth for the design is the
+architecture doc ("Single-node PaaS panel: architecture and data model"). "Berth" is the working
+name; it lives only in `internal/brand/brand.go`.
+
+**How to use:** tick a box only when the item is built *and* verified (test or manual run).
+`[ ]` not started · `[~]` in progress · `[x]` done.
+
+**Progress:** M0 ◐ · M1 ◐ · M2 ☐ · M3 ☐ · M4 ☐ · M5 ☐ · M6 ☐
+
+**Next up:** M1 → updates (updater container, `berth update`), then publish the image to a registry to finish the installer's pull path. Still open in M1: the onboarding steps for S3, registry and notifications wait for their milestones.
+
+---
+
+## M0 — Project skeleton
+
+Everything needed before the first feature: repo layout, tooling, and the shared plumbing.
+
+### Repository and tooling
+- [x] Go module (`panel`, brand-neutral so a rename never touches imports), `cmd/panel` entrypoint, package layout from the doc
+- [x] `internal/brand` — `Name` and `Slug` constants; every path, network, env prefix derives from them
+- [x] `internal/config` — data dir, listen address, env vars with the `BERTH_` prefix
+- [x] Makefile: `deps`, `dev-api`, `dev-web`, `web`, `build`, `test`, `image`
+- [ ] Linting (golangci-lint, eslint)
+- [x] Multi-stage `Dockerfile` (web build → Go build → slim runtime image) — `make image`, 36 MB, runs on a fresh Ubuntu 24.04 arm64 VM
+- [x] `.gitignore`, `.editorconfig`, README with dev setup
+- [ ] CI: vet, test, web typecheck and build
+- [ ] Decide license (open question in the doc)
+
+### Store (`internal/store`)
+- [x] SQLite via `modernc.org/sqlite` (pure Go), WAL mode, foreign keys on, busy timeout — `make test` green with the real driver (2026-11-10)
+- [x] Migrations embedded in the binary, run at startup (small built-in runner, `internal/store/migrate.go`; goose can replace it if down-migrations are ever needed)
+- [~] Pre-migration backup with `VACUUM INTO` — runs when migration 0002 is applied to an existing database; not yet checked by restoring one
+- [x] ULID ids (strictly increasing within a process), `created_at` / `updated_at` on every table
+- [ ] sqlc for typed queries
+- [x] `internal/secret` — AES-GCM encryption with a key file in the data dir
+
+### HTTP API (`internal/api`)
+- [x] Router (std `net/http`), request logging, panic recovery, security headers, JSON error format
+- [x] `GET /api/health`
+- [x] `GET /api/meta` — product name, slug, version, setup state (the UI hard-codes no product string)
+- [x] Serve the embedded SPA with client-side-routing fallback
+- [x] SSE helper for log and status streams (`internal/api/sse.go`); open streams end on shutdown
+
+### Web app (`web/`)
+- [x] Vite + React + TypeScript + Tailwind
+- [x] TanStack Router and TanStack Query
+- [ ] ReUI / shadcn components copied into the repo
+- [x] Theme tokens: zero radius, 1 px borders, monospace body, pixel font for headings and badges, one accent on a dark base
+- [x] App shell: sidebar, sign-out, overview page with projects, empty state and recent activity
+- [x] API client with typed errors; product name read from `/api/meta`
+- [x] Dev proxy to the Go server; production build embedded with `go:embed`
+
+---
+
+## M1 — Foundation
+
+Goal: install on a real VPS, create the owner, deploy a public image, attach a domain with automatic TLS, watch live logs.
+
+### Auth and owner
+- [x] Migration: `users`, `sessions`, `api_tokens`, `settings`
+- [x] Password hashing — PBKDF2-HMAC-SHA256, 600k iterations (stdlib); the stored format carries an algorithm id so argon2id can be added later
+- [x] One-time setup token, valid 15 minutes, stored hashed
+- [x] `POST /api/setup` — create the owner with a valid setup token
+- [x] `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
+- [x] Cookie sessions (HttpOnly, SameSite, Secure when on HTTPS), expiry and cleanup
+- [x] Auth middleware; CSRF protection for cookie-authenticated writes (same-origin check)
+- [x] Login and setup rate limiting (per IP, in memory; the client IP comes from Caddy's `X-Forwarded-For` when the peer is private)
+- [x] API tokens: create, list, revoke, bearer auth (`/api/tokens`, `Authorization: Bearer berth_…`); token management needs the browser session; last use recorded at most once a minute; events name the token. Checked by `internal/api/tokens_test.go` and in a browser against the dev stack
+
+### CLI (same binary)
+- [x] `berth serve`
+- [x] `berth owner create`
+- [x] `berth owner reset-password`
+- [x] `berth setup-token`
+- [x] `berth version`
+
+### Executor (`internal/executor`)
+Verified by `internal/executor/docker_test.go` against a real daemon (skipped with `-short` or when no daemon answers).
+
+- [x] `Executor` interface — the seam for multi-server later
+- [x] Local Docker implementation over the mounted socket (`github.com/moby/moby/client`, API version negotiated)
+- [x] Ensure the `berth` Docker network exists (at `serve` startup)
+- [x] Image pull with progress
+- [x] Container create / start / stop / remove / inspect, with labels identifying panel-managed containers (`berth.managed`, `berth.kind`, `berth.resource`); json-file log rotation 10 MB × 3
+- [x] Container log streaming (follow, tail, since), stdout and stderr demultiplexed
+- [x] CPU and memory limits
+- [x] Reconcile on startup: adopt running managed containers (proxy and apps), log orphans; unfinished deployments are marked failed
+
+### Proxy (`internal/proxy`)
+Verified by `internal/proxy/manager_test.go` against a real Caddy container (skipped with `-short` or when no daemon answers).
+
+- [x] Start and supervise the Caddy container (ports 80/443, data under `<data dir>/proxy`); recreated when its spec changes, checked every 30 s
+- [x] Caddy admin API client — unix socket in the data dir on Linux, TCP on 127.0.0.1 for development on macOS/Windows
+- [x] Config builder: full Caddy JSON derived from SQLite (panel domain and one route per app with domains)
+- [x] Rebuild and push the full config on startup (also written to the file Caddy boots from)
+- [x] Route `http://<server-ip>` to the panel UI
+- [~] Panel domain with automatic TLS — `GET/PUT /api/settings/panel`, verified with Caddy's internal CA; not yet tried with a public domain and Let's Encrypt; settings screen and onboarding step done
+- [~] Per-app route with automatic TLS (`tls_mode = auto`) — verified end to end with Caddy's internal CA on a `.test` name; not yet tried with a public domain and Let's Encrypt
+- [x] Atomic upstream patch for a single route
+- [x] Socket admin mode end to end on a Linux host — installed panel on an Ubuntu 24.04 VM: `proxy ready admin=socket`, deploy and route switch work (2026-11-11)
+
+### Projects and apps (image source only)
+Verified by unit tests (fake container host) and one manual end-to-end run against real Docker and Caddy: deploy, redeploy with zero failed requests, failed deploy keeps the old container, stop/start, panel restart, delete.
+
+- [x] Migration: `projects`, `apps`, `domains`, `deployments`, `events` (`0002_projects_apps.sql`)
+- [x] Projects CRUD — `/api/projects`
+- [x] Apps CRUD — source type `image`, public registry, port, CPU and memory limits — `/api/projects/{id}/apps`, `/api/apps/{id}`
+- [x] Domains: add, remove, hostname validation, DNS check hint — `/api/apps/{id}/domains`, `/api/domains/{id}/dns`
+- [x] Minimal deploy: pull → start → switch route → remove old (no health checks yet; a container that exits or restarts within 3 s fails the deploy) — `internal/deploy`
+- [x] Deployment record with status and log file path — `/api/deployments/{id}`, `/api/deployments/{id}/log`
+- [x] Start / stop / restart an app
+- [x] `events` rows for every mutating action (audit log, activity feed) — `/api/events`
+- [ ] Automated integration test of a deploy against a real Docker daemon (today's end-to-end run was a throwaway script)
+
+### Live logs
+Verified by API tests (with the race detector) and in a browser against a real nginx container: lines appear as requests arrive, search, pause, wrap, follow, stop and start.
+
+- [x] SSE endpoint for container runtime logs — `/api/apps/{id}/logs/stream`; resumes after the last line on reconnect
+- [x] SSE endpoint for deployment logs, persisted per deployment — `/api/deployments/{id}/log/stream`; follows the file, resumes by byte offset
+- [x] Log viewer in the UI (follow, pause, search, wrap); keeps the last 5000 lines
+
+### Installer
+- [x] `install.sh` generated from the brand constants — `make installer` fills `install/install.sh.tmpl`; shellcheck clean (hooking it into a release pipeline is under Cross-cutting)
+- [x] Checks: root, OS, architecture, ports 80 and 443 free (skipped on a re-run, which finds its own proxy there)
+- [x] Docker Engine check and install from Docker's official script — verified on a VM without Docker (installed 29.9.3 with Compose)
+- [x] Create `/var/lib/berth` and the Docker network
+- [~] Pull and start the panel image with the socket and data dir mounted — Compose project in `/var/lib/berth/compose.yaml`; start verified with a loaded image (`BERTH_PULL=never`), pulling from a registry not tried yet (no registry)
+- [x] Print the setup URL with the one-time token; `berth` host command wraps the CLI in the container
+- [~] Under 60 seconds on a server that already has Docker — 2 s with the images already local; image download time from a registry still to measure
+
+### Updates
+- [ ] Short-lived updater container that pulls the new image and recreates the panel
+- [ ] `berth update` and an update button with the available version
+
+### UI
+Checked in a browser against a real deploy (create project and app, add domain, deploy, failed redeploy, stop/start, delete), desktop and phone width.
+
+- [x] Setup screen (token → owner email and password)
+- [x] Login screen
+- [~] Onboarding stepper — `/onboarding`, shown after setup and until finished or skipped (saved on the server: `/api/onboarding`), reachable again from Settings. Steps today: panel domain, first deploy. S3, registry and notifications steps arrive with M4, M5 and M6
+- [x] Projects list and project page (create, rename, delete)
+- [x] Create-app flow (image)
+- [x] App page: overview, deployments (live log), logs (live container output), domains (with DNS hint), settings
+- [x] Activity feed
+- [x] API tokens section on the Settings page: create (secret shown once, copy, curl example), list with last use, revoke
+- [x] Settings page with the panel domain section: set, change, remove, certificate email, DNS hint (`/api/settings/panel/dns`); checked in a browser with `panel.test` through Caddy's internal CA
+
+---
+
+## M2 — Git and builds
+
+Goal: push-to-deploy from a repository with any of the builders.
+
+### Git sources
+- [ ] Migration: `git_sources`, `registries`, `env_vars`
+- [ ] Public Git URL
+- [ ] Private repo by deploy key (generate key pair, show public key)
+- [ ] GitHub App (first provider — confirm against the open question)
+- [ ] GitLab token
+- [ ] Gitea token
+- [ ] Repo and branch picker in the UI
+- [ ] Clone / fetch at a commit into a build workspace, with cleanup
+
+### Builders (`internal/builder`)
+- [ ] Builder interface: source dir in, tagged local image out
+- [ ] Auto-detect: Dockerfile if present, otherwise Railpack
+- [ ] Dockerfile — `docker buildx build`
+- [ ] Railpack — `railpack` CLI on BuildKit (default)
+- [ ] Nixpacks — `nixpacks build`
+- [ ] Cloud Native Buildpacks — `pack build --builder <image>` (Heroku / Paketo)
+- [ ] Static — build command, output served by a small Caddy image
+- [ ] Builder CLIs shipped in the panel image, pinned versions
+- [ ] Image tag `app-<id>:<commit-sha>`; keep the last 5, prune older
+- [ ] Push to the configured registry after a build
+
+### Jobs and queue (`internal/jobs`)
+- [ ] SQLite-backed job queue with retries and resume after restart
+- [ ] One build at a time by default, configurable
+- [ ] CPU and memory caps on builds
+- [ ] Cancel a queued or running build
+- [ ] Cron scheduler (`robfig/cron`)
+
+### Env vars and registries
+- [ ] Env vars CRUD, encrypted at rest, build-time flag
+- [ ] Bulk edit / `.env` paste
+- [ ] External private registries: add, test credentials, pull with auth
+- [ ] App source: image from a private registry
+
+### UI
+- [ ] Git sources settings
+- [ ] Create-app flow (Git) with builder choice
+- [ ] Build log stream on the deployment page
+- [ ] Env vars editor
+- [ ] Registries settings
+
+---
+
+## M3 — Deploy quality
+
+Goal: zero-downtime deploys you can trust, with rollback and every trigger.
+
+### State machine (`internal/deploy`)
+- [ ] States: `queued → building → starting → health_checking → switching → draining → succeeded`
+- [ ] Exits: `failed`, `cancelled`, `rolled_back`
+- [ ] Resume or fail cleanly after a panel restart mid-deploy; no orphan containers
+
+### Health checks
+- [ ] Migration: `app_health_checks`, `volumes`, `certificates`
+- [ ] `tcp` (default)
+- [ ] `http` — path, expected status, interval, timeout, retries, start period
+- [ ] `running` — stays up for N seconds
+- [ ] Checks run by the panel from inside the Docker network
+- [ ] Continuous health monitoring after deploy (feeds alerts in M6)
+
+### Strategies
+- [ ] Rolling: start new → health check → patch Caddy upstream → drain (default 10 s) → remove old
+- [ ] Rolling failure path: remove new, leave route untouched, mark failed
+- [ ] Recreate: stop old → start new → health check → roll back to previous image on failure
+- [ ] Recreate forced for apps with volumes or published host ports; UI states the short gap
+- [ ] Volumes CRUD and mounts
+
+### Rollback and triggers
+- [ ] Rollback to a kept image through the same pipeline, without a build
+- [ ] Manual deploy (button and API)
+- [ ] Git push webhooks, filtered by branch and optional path
+- [ ] Deploy webhook `POST /api/hooks/deploy/<token>` with optional image tag or commit
+- [ ] Auto-deploy toggle per app; regenerate deploy token
+
+### TLS modes
+- [ ] `http_only` (behind Cloudflare proxy)
+- [ ] `dns01` (wildcards; provider credentials)
+- [ ] `custom` — upload certificate and key, expiry tracking
+- [ ] Domain redirects (`redirect_to`), www / apex
+
+### UI
+- [ ] Health check settings
+- [ ] Deployment timeline with per-state timing
+- [ ] Rollback picker
+- [ ] Webhook and auto-deploy settings
+- [ ] Certificates page
+- [ ] Container terminal (WebSocket + xterm.js)
+
+---
+
+## M4 — Databases
+
+Goal: managed Postgres and MariaDB with scheduled S3 backups and restore.
+
+### Instances (`internal/database`)
+- [ ] Migration: `db_instances`, `db_databases`, `db_users`, `s3_connections`, `backup_policies`, `backups`
+- [ ] Driver interface: provision, databases, users, backup, restore
+- [ ] Postgres driver
+- [ ] MariaDB driver
+- [ ] Version picker, persistent volume, CPU and memory limits
+- [ ] Internal-only by default; opt-in public port (confirm against the open question)
+- [ ] Start / stop / restart / delete with confirmation
+- [ ] Connection strings; inject into an app as env vars
+
+### Databases and users
+- [ ] Create / drop databases
+- [ ] Create / drop users, grants, password rotation
+- [ ] Mirror tables kept in sync with the instance
+
+### Storage connection (`internal/storage`)
+- [ ] S3 client
+- [ ] External S3 connections CRUD (AWS, R2, others) with a connection test
+
+### Backups
+- [ ] Manual backup of an instance or a single database
+- [ ] Backup policies: cron and retention
+- [ ] Streamed, compressed upload to S3
+- [ ] Retention pruning
+- [ ] Restore from a `backups` row (into the same or a new database)
+- [ ] Backup status, size, and failure reason
+
+### UI
+- [ ] Database instances list and create flow
+- [ ] Instance page: overview, databases, users, backups, logs, settings
+- [ ] S3 connections settings
+- [ ] Backup policy editor and restore dialog
+
+---
+
+## M5 — Storage and registry
+
+Goal: optional built-in S3 and image registry.
+
+### Internal S3
+- [ ] RustFS stability check; ship behind an "experimental" label if needed (open question)
+- [ ] RustFS container lifecycle (start, stop, upgrade, data volume)
+- [ ] Buckets and access keys management
+- [ ] Routed through Caddy with TLS
+- [ ] Usable as a backup target and as the registry backend
+
+### Internal registry (`internal/registry`)
+- [ ] Registry container lifecycle, backed by an S3 connection
+- [ ] Auth for push and pull
+- [ ] Routed through Caddy with TLS
+- [ ] Push notification endpoint → auto-deploy on a new tag
+- [ ] Repositories and tags browser, delete, garbage collection
+- [ ] App source: image from the internal registry
+
+### UI
+- [ ] Storage page (buckets, keys, usage)
+- [ ] Registry page (repositories, tags, push instructions)
+
+---
+
+## M6 — Insights and alerts
+
+Goal: see what the server is doing and get told when something breaks.
+
+### Metrics (`internal/metrics`)
+- [ ] Migration: `metrics_samples`, `notification_channels`, `alert_rules`
+- [ ] Docker stats sampler, 10 s samples (CPU, memory, network, disk)
+- [ ] Rollups to 1 min and 1 h; prune after 30 days
+- [ ] Host metrics: CPU, memory, disk, load
+- [ ] Metrics query API
+
+### Notifications (`internal/notify`)
+- [ ] Channel interface with a test-send
+- [ ] Email (SMTP)
+- [ ] Slack
+- [ ] Discord
+- [ ] Telegram
+- [ ] Generic webhook
+- [ ] Alert rules: event, target, channel
+- [ ] Events: deploy started / succeeded / failed, health failing, backup failed, disk high
+
+### More engines
+- [ ] MongoDB driver
+- [ ] ClickHouse driver
+
+### UI
+- [ ] Global dashboard
+- [ ] Per-app and per-database charts (Recharts)
+- [ ] Notification channels settings
+- [ ] Alert rules editor
+
+---
+
+## Cross-cutting
+
+- [ ] Unit tests for store, secret, deploy state machine, Caddy config builder
+- [ ] Integration tests against a real Docker daemon
+- [ ] End-to-end test: install script on a fresh VM
+- [ ] Security review: socket exposure, secrets at rest, webhook token handling, headers
+- [ ] Panel self-backup (SQLite file + key) and restore procedure
+- [ ] Docs: install, first deploy, backups, updates, recovery CLI
+- [ ] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog
+
+## Out of v1
+
+Multiple servers · teams and roles beyond a single owner · Docker Compose stacks · preview environments · database replication.
+
+## Open questions
+
+- [ ] Final product name and install domain
+- [ ] License: MIT, Apache 2.0, or AGPL
+- [ ] RustFS: stable enough, or "experimental" label
+- [ ] Database instances: internal-only by default with an opt-in public port?
+- [ ] Docker Compose stacks in v1?
+- [ ] First Git provider: GitHub App or GitLab token

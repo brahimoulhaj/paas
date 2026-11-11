@@ -1,0 +1,83 @@
+# Development stack with live reload. Start it with `make dev` (or, once the `berth`
+# network exists, `docker compose watch`), then open http://localhost:5173.
+#
+#   web/**        synced into the Vite container: changes show up instantly (HMR)
+#   cmd/, internal/  synced into the API container, which restarts and recompiles (a few seconds)
+#   go.mod, package.json, lockfiles   rebuild the image
+#
+# Panel data (database, key, Caddy certificates, deployment logs) lives in the named
+# volume berth-data. BERTH_DATA_VOLUME tells the panel so: the Caddy container it starts
+# then mounts its folders from that volume instead of from host paths.
+
+name: berth-dev
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: dev/api.Dockerfile
+    environment:
+      BERTH_DATA_DIR: /var/lib/berth
+      BERTH_DATA_VOLUME: berth-data
+      BERTH_PUBLIC_URL: http://localhost:5173
+      BERTH_PROXY_HTTP_PORT: "8880"
+      BERTH_PROXY_HTTPS_PORT: "8443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - berth-data:/var/lib/berth
+    ports:
+      - "8080:8080"
+    networks:
+      default:
+      berth:
+        aliases: [berth] # the proxy reaches the panel as berth:8080
+    stop_grace_period: 20s
+    develop:
+      watch:
+        - path: ./cmd
+          target: /src/cmd
+          action: sync+restart
+        - path: ./internal
+          target: /src/internal
+          action: sync+restart
+          ignore:
+            - webui/dist/
+            - "**/*_test.go"
+        - path: ./go.mod
+          action: rebuild
+        - path: ./go.sum
+          action: rebuild
+
+  web:
+    build:
+      context: .
+      dockerfile: dev/web.Dockerfile
+    environment:
+      API_URL: http://api:8080
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    develop:
+      watch:
+        - path: ./web
+          target: /app/web
+          action: sync
+          ignore:
+            - node_modules/
+        - path: ./web/package.json
+          action: rebuild
+        - path: ./web/pnpm-lock.yaml
+          action: rebuild
+
+networks:
+  # Created by `make dev` (and by the panel itself); shared with Caddy and app containers.
+  berth:
+    name: berth
+    external: true
+
+volumes:
+  # A fixed name, not prefixed with the compose project: the panel passes it to Docker
+  # when it creates the Caddy container. `docker compose down` keeps it; `down -v` deletes it.
+  berth-data:
+    name: berth-data

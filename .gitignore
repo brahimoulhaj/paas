@@ -1,0 +1,11 @@
+/bin/
+/.data/
+*.db
+*.db-shm
+*.db-wal
+web/node_modules/
+internal/webui/dist/*
+!internal/webui/dist/.gitkeep
+.DS_Store
+/tmp/
+.claude/settings.local.json
