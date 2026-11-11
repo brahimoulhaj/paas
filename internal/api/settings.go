@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/mail"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,6 +23,9 @@ func (s *Server) SetProxy(p ProxyApplier) { s.proxy = p }
 type panelSettings struct {
 	Domain    string `json:"domain"`
 	ACMEEmail string `json:"acme_email"`
+	TLSMode   string `json:"tls_mode"` // "auto" (default) or "http_only"
+	// IPAccess: the panel also answers on http://<server-ip>. Turning it off needs a domain.
+	IPAccess *bool `json:"ip_access,omitempty"`
 }
 
 func (s *Server) handleGetPanelSettings(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +39,21 @@ func (s *Server) handleGetPanelSettings(w http.ResponseWriter, r *http.Request) 
 		s.internal(w, "panel settings", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, panelSettings{Domain: domain, ACMEEmail: email})
+	mode, _, err := s.store.GetSetting(r.Context(), store.SettingPanelTLS)
+	if err != nil {
+		s.internal(w, "panel settings", err)
+		return
+	}
+	if mode == "" {
+		mode = store.TLSAuto
+	}
+	ipOff, _, err := s.store.GetSetting(r.Context(), store.SettingPanelIPOff)
+	if err != nil {
+		s.internal(w, "panel settings", err)
+		return
+	}
+	ip := !(ipOff == "true" && domain != "")
+	writeJSON(w, http.StatusOK, panelSettings{Domain: domain, ACMEEmail: email, TLSMode: mode, IPAccess: &ip})
 }
 
 // handlePutPanelSettings sets the panel's own domain (served over HTTPS with an automatic
@@ -48,6 +66,19 @@ func (s *Server) handlePutPanelSettings(w http.ResponseWriter, r *http.Request) 
 	}
 	in.Domain = strings.ToLower(strings.TrimSpace(in.Domain))
 	in.ACMEEmail = strings.TrimSpace(in.ACMEEmail)
+	if in.TLSMode == "" {
+		in.TLSMode = store.TLSAuto
+	}
+	if !store.ValidTLSMode(in.TLSMode) {
+		writeError(w, http.StatusUnprocessableEntity, "invalid", `tls_mode must be "auto" or "http_only"`)
+		return
+	}
+	ipAccess := in.IPAccess == nil || *in.IPAccess
+	if !ipAccess && in.Domain == "" {
+		writeError(w, http.StatusUnprocessableEntity, "invalid", "IP access can only be turned off once the panel has a domain")
+		return
+	}
+	in.IPAccess = &ipAccess
 	if in.Domain != "" {
 		if err := proxy.ValidHost(in.Domain); err != nil {
 			writeError(w, http.StatusUnprocessableEntity, "invalid", "domain must be a hostname like panel.example.com")
@@ -71,7 +102,7 @@ func (s *Server) handlePutPanelSettings(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 	}
-	for key, value := range map[string]string{store.SettingPanelDomain: in.Domain, store.SettingACMEEmail: in.ACMEEmail} {
+	for key, value := range map[string]string{store.SettingPanelDomain: in.Domain, store.SettingACMEEmail: in.ACMEEmail, store.SettingPanelTLS: in.TLSMode, store.SettingPanelIPOff: strconv.FormatBool(!ipAccess)} {
 		if err := s.store.SetSetting(r.Context(), key, value); err != nil {
 			s.internal(w, "panel settings", err)
 			return

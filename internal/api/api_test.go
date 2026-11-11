@@ -279,6 +279,30 @@ func TestPanelSettings(t *testing.T) {
 	if code, m := e.call("GET", "/api/settings/panel", nil); code != 200 || m["domain"] != "panel.example.com" {
 		t.Fatalf("after PUT = %d %v", code, m)
 	}
+	if code, m := e.call("GET", "/api/settings/panel", nil); m["tls_mode"] != "auto" {
+		t.Fatalf("default tls_mode = %d %v", code, m)
+	}
+	if code, m := e.call("PUT", "/api/settings/panel", map[string]any{"domain": "panel.example.com", "tls_mode": "bogus"}); code != 422 {
+		t.Fatalf("bad tls_mode = %d %v", code, m)
+	}
+	if code, m := e.call("PUT", "/api/settings/panel", map[string]any{"domain": "panel.example.com", "tls_mode": "http_only"}); code != 200 || m["tls_mode"] != "http_only" {
+		t.Fatalf("http_only = %d %v", code, m)
+	}
+	if code, m := e.call("GET", "/api/settings/panel", nil); m["tls_mode"] != "http_only" {
+		t.Fatalf("persisted tls_mode = %d %v", code, m)
+	}
+	if code, m := e.call("GET", "/api/settings/panel", nil); m["ip_access"] != true {
+		t.Fatalf("default ip_access = %d %v", code, m)
+	}
+	if code, m := e.call("PUT", "/api/settings/panel", map[string]any{"domain": "", "ip_access": false}); code != 422 {
+		t.Fatalf("ip access off without a domain = %d %v", code, m)
+	}
+	if code, m := e.call("PUT", "/api/settings/panel", map[string]any{"domain": "panel.example.com", "ip_access": false}); code != 200 || m["ip_access"] != false {
+		t.Fatalf("ip access off = %d %v", code, m)
+	}
+	if code, m := e.call("GET", "/api/settings/panel", nil); m["ip_access"] != false {
+		t.Fatalf("persisted ip_access = %d %v", code, m)
+	}
 	e.srv.lookupHost = func(_ context.Context, host string) ([]string, error) {
 		if host != "panel.example.com" {
 			t.Errorf("looked up %q", host)

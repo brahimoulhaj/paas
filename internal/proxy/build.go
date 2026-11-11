@@ -15,11 +15,16 @@ import (
 
 // Config is everything the Caddy configuration is derived from.
 type Config struct {
-	AdminListen   string  // Caddy network address of the admin API, e.g. "unix//run/caddy/admin.sock"
-	PanelUpstream string  // host:port where Caddy reaches the panel
-	PanelDomain   string  // optional; served over HTTPS with an automatic certificate
-	ACMEEmail     string  // optional; the account email for the certificate authority
-	Routes        []Route // one per app (or built-in service) that has domains
+	AdminListen   string // Caddy network address of the admin API, e.g. "unix//run/caddy/admin.sock"
+	PanelUpstream string // host:port where Caddy reaches the panel
+	PanelDomain   string // optional; served over HTTPS with an automatic certificate
+	PanelHTTPOnly bool   // serve PanelDomain over plain HTTP only (CDN terminates TLS)
+	// PanelDomainOnly drops requests for unknown hostnames (e.g. http://<server-ip>) instead
+	// of sending them to the panel. Only honoured when PanelDomain is set, so the panel can
+	// never become unreachable through the proxy.
+	PanelDomainOnly bool
+	ACMEEmail       string  // optional; the account email for the certificate authority
+	Routes          []Route // one per app (or built-in service) that has domains
 }
 
 // Route sends requests for a set of hostnames to a set of upstreams. By default a host is
@@ -99,7 +104,11 @@ func Build(c Config) ([]byte, error) {
 	sort.Slice(routes, func(i, j int) bool { return routes[i].ID < routes[j].ID })
 	if c.PanelDomain != "" {
 		// The panel is a route like any other; listed first so its id is predictable.
-		routes = append([]Route{{ID: "panel", Hosts: []string{c.PanelDomain}, Upstreams: []string{c.PanelUpstream}}}, routes...)
+		panel := Route{ID: "panel", Hosts: []string{c.PanelDomain}, Upstreams: []string{c.PanelUpstream}}
+		if c.PanelHTTPOnly {
+			panel.HTTPOnly = []string{c.PanelDomain}
+		}
+		routes = append([]Route{panel}, routes...)
 	}
 
 	seenID := map[string]bool{}
@@ -168,10 +177,18 @@ func Build(c Config) ([]byte, error) {
 		}
 	}
 
-	// Last on the HTTP server: anything that is not a known hostname reaches the panel.
-	httpRoutes = append(httpRoutes, object{
-		"handle": []object{{"handler": "reverse_proxy", "upstreams": []object{{"dial": c.PanelUpstream}}}},
-	})
+	// Last on the HTTP server: anything that is not a known hostname reaches the panel, or,
+	// once the panel has its own domain and IP access is off, the connection is dropped.
+	if c.PanelDomainOnly && c.PanelDomain != "" {
+		httpRoutes = append(httpRoutes, object{
+			"@id":    "panel-ip-blocked",
+			"handle": []object{{"handler": "static_response", "abort": true}},
+		})
+	} else {
+		httpRoutes = append(httpRoutes, object{
+			"handle": []object{{"handler": "reverse_proxy", "upstreams": []object{{"dial": c.PanelUpstream}}}},
+		})
+	}
 
 	servers := object{
 		"http": object{"listen": []string{httpListen}, "routes": httpRoutes},

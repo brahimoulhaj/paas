@@ -291,7 +291,20 @@ func proxySource(st *store.Store) func(context.Context) (proxy.Config, error) {
 		if err != nil {
 			return proxy.Config{}, err
 		}
-		cfg := proxy.Config{PanelDomain: domain, ACMEEmail: email}
+		panelTLS, _, err := st.GetSetting(ctx, store.SettingPanelTLS)
+		if err != nil {
+			return proxy.Config{}, err
+		}
+		ipOff, _, err := st.GetSetting(ctx, store.SettingPanelIPOff)
+		if err != nil {
+			return proxy.Config{}, err
+		}
+		cfg := proxy.Config{
+			PanelDomain:     domain,
+			PanelHTTPOnly:   panelTLS == store.TLSHTTPOnly,
+			PanelDomainOnly: ipOff == "true",
+			ACMEEmail:       email,
+		}
 		for _, r := range routes {
 			route := proxy.Route{ID: r.AppID, Hosts: r.Hosts, HTTPOnly: r.HTTPOnly}
 			if r.Upstream != "" {

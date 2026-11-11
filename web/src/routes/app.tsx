@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DnsHintText } from '../components/dns'
 import { LogViewer } from '../components/logviewer'
-import { Badge, Button, ConfirmButton, cx, Empty, ErrorNote, Field, PageHeader, Panel, QueryState } from '../components/ui'
+import { Badge, Button, ConfirmButton, cx, Empty, ErrorNote, Field, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
 import {
   api,
   appQuery,
@@ -386,22 +386,6 @@ function Domains({ app }: { app: App }) {
         </form>
       </Panel>
     </div>
-  )
-}
-
-/** HTTP-only serving, for a CDN that terminates TLS itself and talks HTTP to this server. */
-function HttpOnlyChoice({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="flex cursor-pointer items-start gap-3 text-sm">
-      <input type="checkbox" className="mt-0.5 accent-[var(--color-accent)]" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-      <span>
-        HTTP only
-        <span className="block text-xs text-muted">
-          For a CDN that handles HTTPS and talks plain HTTP to this server, like Cloudflare with SSL set to Flexible. No
-          certificate here and no redirect, which would otherwise loop. Leave off unless you need it.
-        </span>
-      </span>
-    </label>
   )
 }
 

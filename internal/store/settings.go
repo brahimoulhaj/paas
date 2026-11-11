@@ -10,11 +10,13 @@ import (
 
 // Setting keys.
 const (
-	SettingPanelDomain = "panel_domain" // hostname the panel is served on over HTTPS
-	SettingACMEEmail   = "acme_email"   // account email for the certificate authority
-	SettingOnboarded   = "onboarded_at" // when the owner finished or skipped the onboarding steps
-	SettingUpdateAuto  = "update_auto"  // "true": apply panel updates on their own
-	SettingUpdateSeen  = "update_seen"  // finished_at of the last update result recorded as an event
+	SettingPanelDomain = "panel_domain"        // hostname the panel is served on over HTTPS
+	SettingACMEEmail   = "acme_email"          // account email for the certificate authority
+	SettingPanelIPOff  = "panel_ip_access_off" // "true": with a panel domain set, requests by IP (unknown hosts) are dropped
+	SettingPanelTLS    = "panel_domain_tls"    // TLS mode of the panel domain: TLSAuto (default) or TLSHTTPOnly
+	SettingOnboarded   = "onboarded_at"        // when the owner finished or skipped the onboarding steps
+	SettingUpdateAuto  = "update_auto"         // "true": apply panel updates on their own
+	SettingUpdateSeen  = "update_seen"         // finished_at of the last update result recorded as an event
 )
 
 // GetSetting returns the value and whether the key exists.

@@ -236,3 +236,30 @@ func TestBuildHTTPOnlyHosts(t *testing.T) {
 		t.Fatal("http-only host outside the route's hosts accepted")
 	}
 }
+
+func TestBuildPanelHTTPOnly(t *testing.T) {
+	cfg := build(t, Config{AdminListen: "localhost:2019", PanelUpstream: "berth:8080", PanelDomain: "panel.example.com", PanelHTTPOnly: true})
+	if _, has := dig(t, cfg, "apps", "http", "servers").(map[string]any)["https"]; has {
+		t.Fatal("https server built for an HTTP-only panel domain")
+	}
+	r := dig(t, cfg, "apps", "http", "servers", "http", "routes", 0)
+	if dig(t, r, "@id") != "route-panel-http" || dig(t, r, "match", 0, "host", 0) != "panel.example.com" {
+		t.Fatalf("panel route = %v", r)
+	}
+}
+
+func TestBuildPanelDomainOnly(t *testing.T) {
+	last := func(c Config) any {
+		routes := dig(t, build(t, c), "apps", "http", "servers", "http", "routes").([]any)
+		return routes[len(routes)-1]
+	}
+	base := Config{AdminListen: "localhost:2019", PanelUpstream: "berth:8080", PanelDomain: "panel.example.com", PanelDomainOnly: true}
+	if r := last(base); dig(t, r, "handle", 0, "abort") != true {
+		t.Fatalf("catch-all = %v, want abort", r)
+	}
+	// Without a domain the flag is ignored: the panel must stay reachable.
+	base.PanelDomain = ""
+	if r := last(base); dig(t, r, "handle", 0, "handler") != "reverse_proxy" {
+		t.Fatalf("catch-all without domain = %v", r)
+	}
+}

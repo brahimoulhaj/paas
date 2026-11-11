@@ -115,7 +115,7 @@ export type ApiToken = {
   token?: string
 }
 
-export type PanelSettings = { domain: string; acme_email: string }
+export type PanelSettings = { domain: string; acme_email: string; tls_mode?: 'auto' | 'http_only'; ip_access?: boolean }
 
 export type PanelEvent = {
   id: string

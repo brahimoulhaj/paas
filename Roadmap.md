@@ -145,6 +145,7 @@ Checked in a browser against a real deploy (create project and app, add domain, 
 - [x] App page: overview, deployments (live log), logs (live container output), domains (with DNS hint), settings
 - [x] Activity feed
 - [x] API tokens section on the Settings page: create (secret shown once, copy, curl example), list with last use, revoke
+- [x] Panel domain options: HTTP only (CDN terminates TLS) and "disable access by IP" (unknown hosts dropped; needs a domain; recovery through `127.0.0.1:8080` over SSH)
 - [x] Settings page with the panel domain section: set, change, remove, certificate email, DNS hint (`/api/settings/panel/dns`); checked in a browser with `panel.test` through Caddy's internal CA
 
 ---

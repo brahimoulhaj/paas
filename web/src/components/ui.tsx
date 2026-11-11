@@ -152,3 +152,40 @@ export function ConfirmButton(props: { label: string; confirm: string; onConfirm
     </span>
   )
 }
+
+/** A checkbox with a label and an optional explanation under it. */
+export function CheckOption(props: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  label: ReactNode
+  hint?: ReactNode
+  disabled?: boolean
+}) {
+  return (
+    <label className={cx('flex items-start gap-3 text-sm', props.disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer')}>
+      <input
+        type="checkbox"
+        className="mt-0.5 accent-[var(--color-accent)]"
+        checked={props.checked}
+        disabled={props.disabled}
+        onChange={(e) => props.onChange(e.target.checked)}
+      />
+      <span>
+        {props.label}
+        {props.hint && <span className="block text-xs text-muted">{props.hint}</span>}
+      </span>
+    </label>
+  )
+}
+
+/** HTTP-only serving, for a CDN that terminates TLS itself and talks HTTP to this server. */
+export function HttpOnlyChoice({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <CheckOption
+      checked={checked}
+      onChange={onChange}
+      label="HTTP only"
+      hint="For a CDN that handles HTTPS and talks plain HTTP to this server, like Cloudflare with SSL set to Flexible. No certificate here and no redirect, which would otherwise loop. Leave off unless you need it."
+    />
+  )
+}
