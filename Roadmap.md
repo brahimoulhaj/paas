@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ☐ · M3 ☐ · M4 ☐ · M5 ☐ · M6 ☐
 
-**Next up:** release and run `berth update` on the VPS; try Let's Encrypt on a domain that is not behind Cloudflare's proxy (panel and app); time a fresh install. Then M2. Still open in M1: the onboarding steps for S3, registry and notifications wait for their milestones.
+**Next up:** on the next release, let `berth update` swap the container on the VPS; time a fresh install. Then M2. Still open in M1: the onboarding steps for S3, registry and notifications wait for their milestones.
 
 ---
 
@@ -96,8 +96,8 @@ Verified by `internal/proxy/manager_test.go` against a real Caddy container (ski
 - [x] Config builder: full Caddy JSON derived from SQLite (panel domain and one route per app with domains)
 - [x] Rebuild and push the full config on startup (also written to the file Caddy boots from)
 - [x] Route `http://<server-ip>` to the panel UI
-- [~] Panel domain with automatic TLS — `GET/PUT /api/settings/panel`, verified with Caddy's internal CA; on a real VPS as `http_only` behind Cloudflare's proxy (`ops.azayr.com`, 2026-11-11), Let's Encrypt on a direct (unproxied) domain not yet tried; settings screen and onboarding step done
-- [~] Per-app route with automatic TLS (`tls_mode = auto`) — verified end to end with Caddy's internal CA on a `.test` name; not yet tried with a public domain and Let's Encrypt
+- [x] Panel domain with automatic TLS — `GET/PUT /api/settings/panel`, verified with Caddy's internal CA; on a real VPS as `http_only` behind Cloudflare's proxy (`ops.azayr.com`) and with a Let's Encrypt certificate on a direct (unproxied) domain (2026-11-11); settings screen and onboarding step done
+- [x] Per-app route with automatic TLS (`tls_mode = auto`) — verified end to end with Caddy's internal CA on a `.test` name, and on a real VPS with a public domain and a Let's Encrypt certificate (2026-11-11)
 - [x] Atomic upstream patch for a single route
 - [x] Socket admin mode end to end on a Linux host — installed panel on an Ubuntu 24.04 VM: `proxy ready admin=socket`, deploy and route switch work (2026-11-11)
 
@@ -132,7 +132,7 @@ Verified by API tests (with the race detector) and in a browser against a real n
 
 ### Updates
 - [x] Short-lived updater container that pulls the new image and recreates the panel — `internal/update` (registry check by semver tag or digest, helper runs `update-apply` to swap the container, result recorded as an event); registry and compose-rewrite logic unit-tested; on a real VPS the panel updated itself 0.1.x → 0.2.0 → 0.2.1 from GHCR (2026-11-11)
-- [~] `berth update` and an update button with the available version — Settings → Updates: check, update now, hourly automatic updates (wait while a deploy runs); `berth update [--check] [--yes]` built (same check and helper; refuses while a helper is already swapping), not yet run on the VPS
+- [~] `berth update` and an update button with the available version — Settings → Updates: check, update now, hourly automatic updates (wait while a deploy runs); `berth update [--check] [--yes]` built (same check and helper; refuses while a helper is already swapping); run on the VPS at 0.2.2, check reports up to date (2026-11-11); a swap through the CLI waits for the next release
 
 ### UI
 Checked in a browser against a real deploy (create project and app, add domain, deploy, failed redeploy, stop/start, delete), desktop and phone width.
@@ -350,7 +350,7 @@ Goal: see what the server is doing and get told when something breaks.
 - [ ] Security review: socket exposure, secrets at rest, webhook token handling, headers
 - [ ] Panel self-backup (SQLite file + key) and restore procedure
 - [ ] Docs: install, first deploy, backups, updates, recovery CLI
-- [x] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog — push a `vX.Y.Z` tag; `.github/workflows/release.yml` publishes `ghcr.io/brahimoulhaj/paas:X.Y.Z` and `:latest` and a GitHub release with generated notes (v0.1.0 → v0.2.1 published)
+- [x] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog — push a `vX.Y.Z` tag; `.github/workflows/release.yml` publishes `ghcr.io/brahimoulhaj/paas:X.Y.Z` and `:latest` and a GitHub release with generated notes (v0.1.0 → v0.2.4 published)
 
 ## Out of v1
 

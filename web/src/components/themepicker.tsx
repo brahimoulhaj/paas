@@ -41,7 +41,9 @@ export function ThemePicker({ brand, onClose }: { brand: string; onClose: () => 
       onClick={(e) => e.target === e.currentTarget && onClose()}
       className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-black/80 backdrop-blur-sm outline-none"
     >
-      <div className="pointer-events-none relative h-[min(28.75rem,48.75vw)] w-full">
+      {/* perspective (without preserve-3d) gives each tilted card its depth while z-index
+          still decides which card sits on top. */}
+      <div className="pointer-events-none relative h-[min(28.75rem,48.75vw)] w-full [perspective:1600px]">
         {themes.map((t, i) => {
           let o = i - index
           if (o > n / 2) o -= n
@@ -56,7 +58,8 @@ export function ThemePicker({ brand, onClose }: { brand: string; onClose: () => 
               aria-hidden={d > 2}
               onClick={() => (o === 0 ? choose(t) : go(o))}
               style={{
-                transform: `translate(-50%, -50%) translateX(${o * 34}%) scale(${o === 0 ? 1 : 0.8 - (d - 1) * 0.08})`,
+                // Side cards turn away from the middle one, their inner edge receding behind it.
+                transform: `translate(-50%, -50%) translateX(${o * 34}%) rotateY(${-Math.sign(o) * 38}deg) scale(${o === 0 ? 1 : 0.82 - (d - 1) * 0.06})`,
                 zIndex: 10 - d,
                 opacity: d > 2 ? 0 : o === 0 ? 1 : 0.5 - (d - 1) * 0.15,
               }}
