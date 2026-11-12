@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"net"
 	"net/http"
@@ -47,6 +48,11 @@ func (w *statusWriter) WriteHeader(code int) {
 
 // Unwrap lets http.ResponseController reach Flush on the underlying writer (needed for SSE).
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *statusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	w.status = http.StatusSwitchingProtocols
+	return http.NewResponseController(w.ResponseWriter).Hijack()
+}
 
 // logRequests logs API calls; static asset hits are skipped to keep the log readable.
 func (s *Server) logRequests(next http.Handler) http.Handler {

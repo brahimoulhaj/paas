@@ -69,11 +69,11 @@ function AppRow({ app }: { app: App }) {
   const t = useT()
   const status = appStatus(live.data ?? app, false)
   return (
-    <li>
+    <li className="flex items-center gap-2 pe-4">
       <Link
         to="/projects/$projectId/apps/$appId"
         params={{ projectId: app.project_id, appId: app.id }}
-        className="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-4 py-3 hover:bg-raised"
+        className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-6 gap-y-1 px-4 py-3 hover:bg-raised"
       >
         <span className="min-w-0">
           <span className="block truncate text-sm">{app.name}</span>
@@ -82,6 +82,9 @@ function AppRow({ app }: { app: App }) {
           </span>
         </span>
         <Badge tone={status.tone}>{status.label}</Badge>
+      </Link>
+      <Link to="/projects/$projectId/apps/$appId" params={{ projectId: app.project_id, appId: app.id }} search={{ tab: 'terminal' }} className="shrink-0 border border-line px-2 py-1.5 text-xs text-muted hover:border-accent hover:text-accent" aria-label={`${t.terminal.title}: ${app.name}`}>
+        <span aria-hidden className="me-1 font-mono">&gt;_</span>{t.terminal.title}
       </Link>
     </li>
   )

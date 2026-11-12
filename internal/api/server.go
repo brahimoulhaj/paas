@@ -106,6 +106,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/apps/{id}/restart", s.requireAuth(s.handleAppAction("restart")))
 	mux.HandleFunc("GET /api/apps/{id}/deployments", s.requireAuth(s.handleListDeployments))
 	mux.HandleFunc("GET /api/apps/{id}/logs/stream", s.requireAuth(s.handleAppLogStream))
+	mux.HandleFunc("GET /api/apps/{id}/terminal", s.requireAuth(sessionOnly(s.handleTerminal)))
 	mux.HandleFunc("GET /api/apps/{id}/domains", s.requireAuth(s.handleListDomains))
 	mux.HandleFunc("POST /api/apps/{id}/domains", s.requireAuth(s.handleCreateDomain))
 

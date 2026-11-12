@@ -19,10 +19,12 @@ import * as settingsGit from './settingsGit'
 import * as settingsTokens from './settingsTokens'
 import * as settingsUpdates from './settingsUpdates'
 import * as onboarding from './onboarding'
+import * as terminal from './terminal'
 
 type Code = 'en' | 'fr' | 'ar' | 'es'
 
 const pick = (l: Code) => ({
+  terminal: terminal[l] as typeof terminal.en,
   common: common[l] as typeof common.en,
   shell: shell[l] as typeof shell.en,
   auth: auth[l] as typeof auth.en,

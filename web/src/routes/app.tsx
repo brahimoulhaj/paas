@@ -2,7 +2,7 @@ import { MountSettings } from '../components/mounts'
 import { EnvironmentSettings } from '../components/environment'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DnsHintText } from '../components/dns'
 import { LogViewer } from '../components/logviewer'
 import { Badge, Button, ConfirmButton, cx, Empty, ErrorNote, Field, HelpTip, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
@@ -24,7 +24,8 @@ import { SourceFields, sourceChanged, sourceForm, sourceInput } from '../compone
 import { rich, useT } from '../lib/i18n'
 import { appSource, appStatus, dateTime, deploymentVersion, duration, repoName, timeAgo, type Tone } from '../lib/format'
 
-export const appTabs = ['overview', 'deployments', 'logs', 'domains', 'settings'] as const
+const ContainerTerminal = lazy(() => import('../components/container-terminal'))
+export const appTabs = ['overview', 'deployments', 'logs', 'terminal', 'domains', 'settings'] as const
 export type AppTab = (typeof appTabs)[number]
 
 export function AppPage() {
@@ -49,6 +50,10 @@ export function AppPage() {
   }, [latest?.id, latest?.status, appId, queryClient])
 
   const [selected, setSelected] = useState<string | null>(null)
+  const [terminalAppId, setTerminalAppId] = useState<string | null>(null)
+  useEffect(() => {
+    if (tab === 'terminal') setTerminalAppId(appId)
+  }, [tab, appId])
 
   const goto = (t: AppTab) =>
     navigate({ to: '/projects/$projectId/apps/$appId', params: { projectId, appId }, search: { tab: t } })
@@ -135,7 +140,7 @@ export function AppPage() {
             )}
             aria-current={name === tab ? 'page' : undefined}
           >
-            {t.app.tabs[name]}
+            {name === 'terminal' ? t.terminal.title : t.app.tabs[name]}
           </Link>
         ))}
       </nav>
@@ -152,6 +157,13 @@ export function AppPage() {
         />
       )}
       {tab === 'logs' && <RuntimeLogs app={a} />}
+      {(tab === 'terminal' || terminalAppId === a.id) && (
+        <div hidden={tab !== 'terminal'}>
+          <Suspense fallback={<p className="p-4 text-sm text-muted">{t.terminal.connecting}</p>}>
+            <ContainerTerminal key={a.id} app={a} visible={tab === 'terminal'} />
+          </Suspense>
+        </div>
+      )}
       {tab === 'domains' && <Domains app={a} />}
       {tab === 'settings' && <Settings app={a} />}
     </div>
