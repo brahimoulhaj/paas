@@ -1,0 +1,60 @@
+export const en = {
+  title: 'Docker', online: 'Connected', offline: 'Unavailable', live: 'Every 15s', stale: 'Updates paused',
+  loading: 'Reading Docker metrics…', failed: 'Docker metrics could not be loaded. Retrying automatically.',
+  disconnected: 'The Docker daemon cannot be reached.', lastKnown: 'Showing last known readings.',
+  containers: 'Containers', running: 'Running', stopped: 'Stopped', paused: 'Paused', images: 'Images', volumes: 'Volumes',
+  buildCache: 'Build cache', networks: 'Networks', version: 'Engine version', api: 'API version', storageDriver: 'Storage driver',
+  capacity: 'Docker host capacity', cpus: (n: number) => `${n} CPUs`, active: (n: number) => `${n} active`,
+  records: (n: number) => `${n} cache records`, used: (value: string) => `${value} used`, reclaimable: (value: string) => `${value} reclaimable`,
+  details: 'Storage & engine details', category: 'Resource', count: 'Total / active', size: 'Size', reclaimableColumn: 'Reclaimable',
+  storageRefresh: 'Storage scanned every minute', storageUnavailable: 'Storage readings are unavailable or out of date.',
+  partial: 'Some Docker readings are unavailable.', name: 'Daemon name', os: 'Operating system', kernel: 'Kernel',
+  runtime: 'Default runtime', logging: 'Logging driver', cgroup: 'Cgroup', rootDir: 'Docker data directory',
+  liveRestore: 'Live restore', enabled: 'Enabled', disabled: 'Disabled',
+  help: 'Read-only metrics for the entire connected Docker daemon, including containers outside this panel. Counts refresh every 15 seconds; disk usage is scanned once a minute. Sizes are reported by Docker and exclude bind mounts and container logs. Image and build-cache layers can overlap, so the categories are not added together. Reclaimable space is Docker’s estimate, not a cleanup action.',
+}
+
+export const fr: typeof en = {
+  title: 'Docker', online: 'Connecté', offline: 'Indisponible', live: 'Toutes les 15 s', stale: 'Mises à jour en pause',
+  loading: 'Lecture des métriques Docker…', failed: 'Impossible de charger les métriques Docker. Nouvelle tentative automatique.',
+  disconnected: 'Le démon Docker est injoignable.', lastKnown: 'Dernières mesures connues affichées.',
+  containers: 'Conteneurs', running: 'En cours', stopped: 'Arrêtés', paused: 'En pause', images: 'Images', volumes: 'Volumes',
+  buildCache: 'Cache de build', networks: 'Réseaux', version: 'Version du moteur', api: 'Version de l’API', storageDriver: 'Pilote de stockage',
+  capacity: 'Capacité de l’hôte Docker', cpus: (n) => `${n} CPU`, active: (n) => `${n} actifs`, records: (n) => `${n} entrées de cache`,
+  used: (v) => `${v} utilisés`, reclaimable: (v) => `${v} récupérables`, details: 'Stockage et détails du moteur', category: 'Ressource',
+  count: 'Total / actifs', size: 'Taille', reclaimableColumn: 'Récupérable', storageRefresh: 'Stockage analysé chaque minute',
+  storageUnavailable: 'Les mesures de stockage sont indisponibles ou anciennes.', partial: 'Certaines mesures Docker sont indisponibles.',
+  name: 'Nom du démon', os: 'Système d’exploitation', kernel: 'Noyau', runtime: 'Runtime par défaut', logging: 'Pilote de journaux',
+  cgroup: 'Cgroup', rootDir: 'Répertoire de données Docker', liveRestore: 'Restauration en direct', enabled: 'Activée', disabled: 'Désactivée',
+  help: 'Mesures en lecture seule du démon Docker entier, y compris les conteneurs externes au panneau. Compteurs actualisés toutes les 15 secondes ; stockage analysé chaque minute. Les tailles rapportées par Docker excluent les montages bind et les journaux des conteneurs. Les couches des images et du cache peuvent se chevaucher : les catégories ne sont pas additionnées. L’espace récupérable est une estimation de Docker, pas une action de nettoyage.',
+}
+
+export const ar: typeof en = {
+  title: 'Docker', online: 'متصل', offline: 'غير متاح', live: 'كل 15 ثانية', stale: 'التحديثات متوقفة',
+  loading: 'جارٍ قراءة مقاييس Docker…', failed: 'تعذر تحميل مقاييس Docker. ستتم إعادة المحاولة تلقائيًا.',
+  disconnected: 'تعذر الاتصال بخدمة Docker.', lastKnown: 'تُعرض آخر المقاييس المعروفة.',
+  containers: 'الحاويات', running: 'تعمل', stopped: 'متوقفة', paused: 'معلقة', images: 'الصور', volumes: 'وحدات التخزين',
+  buildCache: 'ذاكرة البناء المؤقتة', networks: 'الشبكات', version: 'إصدار المحرك', api: 'إصدار API', storageDriver: 'برنامج تشغيل التخزين',
+  capacity: 'سعة مضيف Docker', cpus: (n) => `${n} معالجات`, active: (n) => `${n} نشطة`, records: (n) => `${n} سجلات تخزين مؤقت`,
+  used: (v) => `${v} مستخدم`, reclaimable: (v) => `${v} قابل للاسترداد`, details: 'التخزين وتفاصيل المحرك', category: 'المورد',
+  count: 'الإجمالي / النشط', size: 'الحجم', reclaimableColumn: 'قابل للاسترداد', storageRefresh: 'يُفحص التخزين كل دقيقة',
+  storageUnavailable: 'مقاييس التخزين غير متاحة أو قديمة.', partial: 'بعض مقاييس Docker غير متاحة.',
+  name: 'اسم الخدمة', os: 'نظام التشغيل', kernel: 'النواة', runtime: 'بيئة التشغيل الافتراضية', logging: 'برنامج تشغيل السجلات',
+  cgroup: 'Cgroup', rootDir: 'مجلد بيانات Docker', liveRestore: 'الاستعادة المباشرة', enabled: 'مفعلة', disabled: 'معطلة',
+  help: 'مقاييس للقراءة فقط لخدمة Docker بالكامل، بما فيها الحاويات خارج اللوحة. تُحدث الأعداد كل 15 ثانية ويُفحص التخزين كل دقيقة. الأحجام حسب Docker ولا تشمل تركيبات bind أو سجلات الحاويات. قد تتداخل طبقات الصور وذاكرة البناء، لذلك لا تُجمع الفئات. المساحة القابلة للاسترداد تقدير من Docker وليست إجراء تنظيف.',
+}
+
+export const es: typeof en = {
+  title: 'Docker', online: 'Conectado', offline: 'No disponible', live: 'Cada 15 s', stale: 'Actualizaciones en pausa',
+  loading: 'Leyendo métricas de Docker…', failed: 'No se pudieron cargar las métricas de Docker. Se reintentará automáticamente.',
+  disconnected: 'No se puede conectar con el daemon de Docker.', lastKnown: 'Se muestran las últimas métricas conocidas.',
+  containers: 'Contenedores', running: 'En ejecución', stopped: 'Detenidos', paused: 'En pausa', images: 'Imágenes', volumes: 'Volúmenes',
+  buildCache: 'Caché de compilación', networks: 'Redes', version: 'Versión del motor', api: 'Versión de la API', storageDriver: 'Controlador de almacenamiento',
+  capacity: 'Capacidad del host Docker', cpus: (n) => `${n} CPU`, active: (n) => `${n} activos`, records: (n) => `${n} registros de caché`,
+  used: (v) => `${v} usados`, reclaimable: (v) => `${v} recuperables`, details: 'Almacenamiento y detalles del motor', category: 'Recurso',
+  count: 'Total / activos', size: 'Tamaño', reclaimableColumn: 'Recuperable', storageRefresh: 'Almacenamiento analizado cada minuto',
+  storageUnavailable: 'Las métricas de almacenamiento no están disponibles o están desactualizadas.', partial: 'Algunas métricas de Docker no están disponibles.',
+  name: 'Nombre del daemon', os: 'Sistema operativo', kernel: 'Kernel', runtime: 'Runtime predeterminado', logging: 'Controlador de registros',
+  cgroup: 'Cgroup', rootDir: 'Directorio de datos de Docker', liveRestore: 'Restauración en directo', enabled: 'Activada', disabled: 'Desactivada',
+  help: 'Métricas de solo lectura de todo el daemon Docker, incluidos los contenedores externos al panel. Los contadores se actualizan cada 15 segundos y el almacenamiento se analiza cada minuto. Los tamaños de Docker excluyen los montajes bind y los registros de contenedores. Las capas de imágenes y caché pueden solaparse, por lo que las categorías no se suman. El espacio recuperable es una estimación de Docker, no una acción de limpieza.',
+}

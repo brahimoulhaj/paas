@@ -89,6 +89,9 @@ export const en = {
   containerGone: 'The container is gone. Redeploy the app.',
 
   noDomainsYet: 'No domains yet.',
+  primary: 'Primary',
+  primaryDomain: 'Primary domain',
+  makePrimary: 'Make primary',
   noDomainsYetHint: 'Add a hostname and point its DNS record at this server. The certificate is issued automatically.',
   addDomainTitle: 'Add a domain',
   hostname: 'Hostname',
@@ -200,6 +203,9 @@ export const fr: typeof en = {
   containerGone: 'Le conteneur n’existe plus. Redéployez l’application.',
 
   noDomainsYet: 'Aucun domaine pour l’instant.',
+  primary: 'Principal',
+  primaryDomain: 'Domaine principal',
+  makePrimary: 'Définir comme principal',
   noDomainsYetHint:
     'Ajoutez un nom d’hôte et faites pointer son enregistrement DNS vers ce serveur. Le certificat est émis automatiquement.',
   addDomainTitle: 'Ajouter un domaine',
@@ -313,6 +319,9 @@ export const ar: typeof en = {
   containerGone: 'الحاوية لم تعد موجودة. أعد نشر التطبيق.',
 
   noDomainsYet: 'لا توجد نطاقات بعد.',
+  primary: 'رئيسي',
+  primaryDomain: 'النطاق الرئيسي',
+  makePrimary: 'تعيين كرئيسي',
   noDomainsYetHint: 'أضف اسم مضيف ووجّه سجل DNS الخاص به إلى هذا الخادم. تُصدر الشهادة تلقائيًا.',
   addDomainTitle: 'إضافة نطاق',
   hostname: 'اسم المضيف',
@@ -424,6 +433,9 @@ export const es: typeof en = {
   containerGone: 'El contenedor ya no existe. Vuelve a desplegar la aplicación.',
 
   noDomainsYet: 'Aún no hay dominios.',
+  primary: 'Principal',
+  primaryDomain: 'Dominio principal',
+  makePrimary: 'Establecer como principal',
   noDomainsYetHint:
     'Añade un nombre de host y apunta su registro DNS a este servidor. El certificado se emite automáticamente.',
   addDomainTitle: 'Añadir un dominio',

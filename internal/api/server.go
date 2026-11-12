@@ -17,16 +17,18 @@ import (
 )
 
 type Server struct {
-	store    *store.Store
-	accounts *account.Service
-	log      *slog.Logger
-	version  string
-	web      fs.FS
-	authRate *rateLimiter
-	proxy    ProxyApplier
-	deployer Deployer
-	updater  Updater
-	git      *gitsource.Service
+	store         *store.Store
+	accounts      *account.Service
+	log           *slog.Logger
+	version       string
+	web           fs.FS
+	authRate      *rateLimiter
+	proxy         ProxyApplier
+	deployer      Deployer
+	updater       Updater
+	git           *gitsource.Service
+	metrics       HostMetrics
+	dockerMetrics DockerMetrics
 
 	logPoll  time.Duration // how often a deployment log stream looks for new lines
 	stop     chan struct{} // closed when the server shuts down; ends open streams
@@ -118,6 +120,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/domains/{id}/dns", s.requireAuth(s.handleDomainDNS))
 
 	mux.HandleFunc("GET /api/events", s.requireAuth(s.handleListEvents))
+	mux.HandleFunc("GET /api/host/metrics", s.requireAuth(s.handleHostMetrics))
+	mux.HandleFunc("GET /api/docker/metrics", s.requireAuth(s.handleDockerMetrics))
 
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "no such endpoint")

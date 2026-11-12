@@ -24,6 +24,7 @@ services:
       BERTH_PROXY_HTTPS_PORT: "8443"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro
       - berth-data:/var/lib/berth
     ports:
       - "8080:8080"

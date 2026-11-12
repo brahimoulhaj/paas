@@ -33,6 +33,56 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
 }
 
 export type Meta = { name: string; slug: string; version: string; setup_required: boolean }
+export type HostMemory = { total: number; used: number; available: number; percent: number }
+export type HostInterface = { name: string; received: number; sent: number; receive_rate: number | null; send_rate: number | null; errors: number; drops: number }
+export type HostMetrics = {
+  collected_at: string
+  hostname: string
+  os: string
+  arch: string
+  uptime_seconds: number | null
+  cpu: { cores: number; model: string; percent: number | null; load: number[] | null }
+  memory: HostMemory | null
+  swap: HostMemory | null
+  disk: (HostMemory & { path: string; inodes_percent: number | null }) | null
+  network: { received: number; sent: number; receive_rate: number | null; send_rate: number | null; interfaces: HostInterface[] } | null
+  history: { at: string; cpu: number | null; memory: number | null; receive_rate: number | null; send_rate: number | null }[]
+  unavailable: string[]
+}
+
+export const hostMetricsQuery = {
+  queryKey: ['host', 'metrics'] as const,
+  queryFn: () => api<HostMetrics>('/host/metrics'),
+  refetchInterval: 5_000,
+  staleTime: 4_000,
+  retry: 1,
+}
+
+export type DockerUsage = { count: number; active: number; size: number | null; reclaimable: number | null }
+export type DockerMetrics = {
+  checked_at: string
+  collected_at: string | null
+  online: boolean
+  engine: {
+    name: string; version: string; api_version: string; os: string; architecture: string; kernel: string
+    storage_driver: string; logging_driver: string; cgroup_driver: string; cgroup_version: string
+    root_dir: string; runtime: string; cpus: number; memory: number; live_restore: boolean
+  } | null
+  containers: { total: number; running: number; paused: number; stopped: number } | null
+  images: number | null
+  networks: number | null
+  storage: { containers: DockerUsage; images: DockerUsage; volumes: DockerUsage; build_cache: DockerUsage } | null
+  storage_at: string | null
+  unavailable: string[]
+}
+
+export const dockerMetricsQuery = {
+  queryKey: ['docker', 'metrics'] as const,
+  queryFn: () => api<DockerMetrics>('/docker/metrics'),
+  refetchInterval: 15_000,
+  staleTime: 10_000,
+  retry: 1,
+}
 export type User = { id: string; email: string; role: string; created_at: string }
 
 export const metaQuery = {
@@ -113,7 +163,7 @@ export type Deployment = {
   created_at: string
 }
 
-export type Domain = { id: string; app_id: string; hostname: string; tls_mode: string; created_at: string }
+export type Domain = { id: string; app_id: string; hostname: string; tls_mode: string; is_primary: boolean; created_at: string }
 
 export type DnsHint = {
   hostname: string

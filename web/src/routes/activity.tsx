@@ -53,6 +53,7 @@ function detail(e: PanelEvent): string {
     case 'app.create':
     case 'domain.add':
     case 'domain.remove':
+    case 'domain.primary':
     case 'deployment.failed':
       return e.detail
     default:

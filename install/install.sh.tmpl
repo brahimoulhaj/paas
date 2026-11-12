@@ -120,6 +120,7 @@ services:
     env_file: panel.env
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - /proc:/host/proc:ro # host CPU, RAM and network counters; read only
       # Same path inside and out: containers the panel starts bind-mount host paths
       # under it, and the proxy's admin socket lives there.
       - $DATA_DIR:$DATA_DIR

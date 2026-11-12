@@ -4,6 +4,8 @@ import { Badge, Empty, PageHeader, Panel, QueryState } from '../components/ui'
 import { eventsQuery, meQuery, metaQuery, projectsQuery } from '../lib/api'
 import { useT } from '../lib/i18n'
 import { EventList } from './activity'
+import { HostMetrics } from '../components/host-metrics'
+import { DockerMetrics } from '../components/docker-metrics'
 
 export function OverviewPage() {
   const t = useT()
@@ -16,6 +18,9 @@ export function OverviewPage() {
   return (
     <div className="space-y-6">
       <PageHeader title={t.overview.title} subtitle={t.overview.signedInAs(me?.email ?? '')} />
+
+      <HostMetrics />
+      <DockerMetrics />
 
       <QueryState loading={projects.isPending} error={projects.error} what={t.projects.what} />
       {projects.data &&

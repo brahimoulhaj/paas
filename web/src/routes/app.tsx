@@ -36,6 +36,8 @@ export function AppPage() {
   const navigate = useNavigate()
 
   const project = useQuery(projectQuery(projectId))
+  const domains = useQuery(domainsQuery(appId))
+  const primaryDomain = domains.data?.find((d) => d.is_primary)
   const deployments = useQuery({
     ...deploymentsQuery(appId),
     refetchInterval: (q) => (q.state.data?.some(isActive) ? 1500 : false),
@@ -100,7 +102,24 @@ export function AppPage() {
             {a.name} <Badge tone={status.tone}>{status.label}</Badge>
           </>
         }
-        subtitle={appSource(a)}
+        subtitle={
+          <>
+            <span className="block">{appSource(a)}</span>
+            {primaryDomain && (
+              <a
+                href={`https://${primaryDomain.hostname}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={t.app.primaryDomain}
+                className="mt-1 inline-flex max-w-full items-center gap-1.5 text-accent hover:underline"
+                dir="ltr"
+              >
+                <span className="[overflow-wrap:anywhere]">{primaryDomain.hostname}</span>
+                <span aria-hidden="true">↗</span>
+              </a>
+            )}
+          </>
+        }
         actions={
           <>
             {deployed && a.desired_state === 'running' && (
@@ -264,9 +283,12 @@ function Overview({ app, latest, onOpenDeployments }: { app: App; latest?: Deplo
             {domains.data?.length ? (
               <span className="flex flex-col items-start">
                 {domains.data.map((d) => (
-                  <a key={d.id} href={`https://${d.hostname}`} target="_blank" rel="noreferrer" className="text-accent hover:underline" dir="ltr">
-                    {d.hostname}
-                  </a>
+                  <span key={d.id} className="flex flex-wrap items-center gap-2">
+                    <a href={`https://${d.hostname}`} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline" dir="ltr">
+                      {d.hostname}
+                    </a>
+                    {d.is_primary && <Badge tone="muted">{t.app.primary}</Badge>}
+                  </span>
                 ))}
               </span>
             ) : (
@@ -421,7 +443,7 @@ function Domains({ app }: { app: App }) {
           ) : (
             <ul className="divide-y divide-line">
               {domains.data.map((d) => (
-                <DomainRow key={d.id} domain={d} onRemoved={refresh} />
+                <DomainRow key={d.id} domain={d} onChanged={refresh} />
               ))}
             </ul>
           ))}
@@ -449,18 +471,23 @@ function Domains({ app }: { app: App }) {
   )
 }
 
-function DomainRow({ domain, onRemoved }: { domain: Domain; onRemoved: () => void }) {
+function DomainRow({ domain, onChanged }: { domain: Domain; onChanged: () => void }) {
   const t = useT()
   const dns = useQuery(dnsQuery(domain.id))
   const remove = useMutation({
     mutationFn: () => api<void>(`/domains/${domain.id}`, { method: 'DELETE' }),
-    onSuccess: onRemoved,
+    onSuccess: onChanged,
   })
   const httpOnly = domain.tls_mode === 'http_only'
   const setMode = useMutation({
     mutationFn: (tls_mode: string) => api<Domain>(`/domains/${domain.id}`, { method: 'PATCH', body: { tls_mode } }),
-    onSettled: onRemoved, // refreshes the list
+    onSettled: onChanged, // refreshes the list
   })
+  const setPrimary = useMutation({
+    mutationFn: () => api<Domain>(`/domains/${domain.id}`, { method: 'PATCH', body: { is_primary: true } }),
+    onSuccess: onChanged,
+  })
+  const busy = remove.isPending || setMode.isPending || setPrimary.isPending
 
   return (
     <li className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3">
@@ -469,6 +496,7 @@ function DomainRow({ domain, onRemoved }: { domain: Domain; onRemoved: () => voi
           <a href={`https://${domain.hostname}`} target="_blank" rel="noreferrer" className="text-sm [overflow-wrap:anywhere] text-accent hover:underline" dir="ltr">
             {domain.hostname}
           </a>
+          {domain.is_primary && <Badge tone="accent">{t.app.primary}</Badge>}
           {httpOnly && <Badge tone="muted">{t.common.httpOnly}</Badge>}
         </p>
         <p className="text-xs text-muted">
@@ -476,18 +504,24 @@ function DomainRow({ domain, onRemoved }: { domain: Domain; onRemoved: () => voi
         </p>
         {remove.error && <p className="text-xs text-danger">{remove.error.message}</p>}
         {setMode.error && <p className="text-xs text-danger">{setMode.error.message}</p>}
+        {setPrimary.error && <p className="text-xs text-danger">{setPrimary.error.message}</p>}
       </div>
       <span className="flex flex-wrap items-center gap-2">
+        {!domain.is_primary && (
+          <Button variant="ghost" type="button" disabled={busy} onClick={() => setPrimary.mutate()}>
+            {setPrimary.isPending ? t.common.saving : t.app.makePrimary}
+          </Button>
+        )}
         <Button
           variant="ghost"
           type="button"
-          disabled={setMode.isPending}
+          disabled={busy}
           title={httpOnly ? t.app.toHttpsTitle : t.app.toHttpTitle}
           onClick={() => setMode.mutate(httpOnly ? 'auto' : 'http_only')}
         >
           {setMode.isPending ? t.common.saving : httpOnly ? t.app.useHttps : t.common.httpOnly}
         </Button>
-        <ConfirmButton label={t.common.remove} confirm={t.common.yesRemove} pending={remove.isPending} onConfirm={() => remove.mutate()} />
+        <ConfirmButton label={t.common.remove} confirm={t.common.yesRemove} disabled={busy} pending={remove.isPending} onConfirm={() => remove.mutate()} />
       </span>
     </li>
   )

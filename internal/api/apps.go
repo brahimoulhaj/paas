@@ -131,11 +131,12 @@ type domainJSON struct {
 	AppID     string    `json:"app_id"`
 	Hostname  string    `json:"hostname"`
 	TLSMode   string    `json:"tls_mode"`
+	IsPrimary bool      `json:"is_primary"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
 func toDomainJSON(d store.Domain) domainJSON {
-	return domainJSON{d.ID, d.AppID, d.Hostname, d.TLSMode, d.CreatedAt}
+	return domainJSON{d.ID, d.AppID, d.Hostname, d.TLSMode, d.IsPrimary, d.CreatedAt}
 }
 
 type eventJSON struct {
@@ -725,38 +726,61 @@ func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, toDomainJSON(d))
 }
 
-// handleUpdateDomain changes how a domain is served: "auto" (HTTPS with a certificate,
-// HTTP redirected) or "http_only" (plain HTTP, for a CDN that terminates TLS itself).
+// handleUpdateDomain changes a domain's TLS mode or the app's primary domain.
 func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		TLSMode string `json:"tls_mode"`
+		TLSMode   *string `json:"tls_mode"`
+		IsPrimary *bool   `json:"is_primary"`
 	}
 	if !readJSON(w, r, &in) {
 		return
 	}
-	if !store.ValidTLSMode(in.TLSMode) {
+	if in.TLSMode != nil && !store.ValidTLSMode(*in.TLSMode) {
 		invalid(w, `tls_mode must be "auto" or "http_only"`)
+		return
+	}
+	if in.IsPrimary != nil && !*in.IsPrimary {
+		invalid(w, "choose another primary domain instead of unsetting the current one")
+		return
+	}
+	if in.TLSMode == nil && in.IsPrimary == nil {
+		invalid(w, "provide tls_mode or is_primary")
 		return
 	}
 	d, err := s.store.GetDomain(r.Context(), r.PathValue("id"))
 	if s.storeError(w, "get domain", err, "") {
 		return
 	}
-	if d.TLSMode != in.TLSMode {
-		if s.storeError(w, "update domain", s.store.SetDomainTLSMode(r.Context(), d.ID, in.TLSMode), "") {
+	tlsMode := d.TLSMode
+	if in.TLSMode != nil {
+		tlsMode = *in.TLSMode
+	}
+	tlsChanged := d.TLSMode != tlsMode
+	primaryChanged := in.IsPrimary != nil && !d.IsPrimary
+	if tlsChanged || primaryChanged {
+		tlsUpdate := ""
+		if in.TLSMode != nil {
+			tlsUpdate = *in.TLSMode
+		}
+		d, err = s.store.UpdateDomain(r.Context(), d.ID, tlsUpdate, primaryChanged)
+		if s.storeError(w, "update domain", err, "") {
 			return
 		}
 		appName := ""
 		if a, err := s.store.GetApp(r.Context(), d.AppID); err == nil {
 			appName = a.Name
 		}
-		s.audit(r, "domain.tls", "app", d.AppID, appName, d.Hostname+": "+in.TLSMode)
-		if !s.applyProxy(r.Context()) {
+		if primaryChanged {
+			s.audit(r, "domain.primary", "app", d.AppID, appName, d.Hostname)
+		}
+		if tlsChanged {
+			s.audit(r, "domain.tls", "app", d.AppID, appName, d.Hostname+": "+tlsMode)
+		}
+		if tlsChanged && !s.applyProxy(r.Context()) {
 			writeError(w, http.StatusServiceUnavailable, "proxy_unavailable",
 				"saved, but the proxy could not be updated; it is applied when the proxy is back")
 			return
 		}
-		d.TLSMode = in.TLSMode
 	}
 	writeJSON(w, http.StatusOK, toDomainJSON(d))
 }

@@ -257,7 +257,7 @@ func TestDomainsAPI(t *testing.T) {
 	}
 
 	d := e.must(201, "POST", domains, map[string]any{"hostname": " Shop.Example.com "})
-	if d["hostname"] != "shop.example.com" || d["tls_mode"] != "auto" || px.applied != 1 {
+	if d["hostname"] != "shop.example.com" || d["tls_mode"] != "auto" || d["is_primary"] != true || px.applied != 1 {
 		t.Fatalf("created = %v, applied %d", d, px.applied)
 	}
 	e.must(409, "POST", domains, map[string]any{"hostname": "shop.example.com"})
@@ -266,10 +266,27 @@ func TestDomainsAPI(t *testing.T) {
 	// TLS mode: HTTP only for a CDN that terminates TLS, switchable both ways.
 	e.must(422, "POST", domains, map[string]any{"hostname": "cf.example.com", "tls_mode": "nope"})
 	cf := e.must(201, "POST", domains, map[string]any{"hostname": "cf.example.com", "tls_mode": "http_only"})
-	if cf["tls_mode"] != "http_only" {
+	if cf["tls_mode"] != "http_only" || cf["is_primary"] != false {
 		t.Fatalf("http-only domain = %v", cf)
 	}
 	modeBase := px.applied
+	// Switching primary is immediate metadata, independent of TLS and proxy availability.
+	px.err = errors.New("down")
+	if m := e.must(200, "PATCH", "/api/domains/"+cf["id"].(string), map[string]any{"is_primary": true}); m["is_primary"] != true || m["tls_mode"] != "http_only" {
+		t.Fatalf("make primary = %v", m)
+	}
+	if got := e.list(domains); len(got) != 2 || got[0]["id"] != cf["id"] || got[1]["is_primary"] != false {
+		t.Fatalf("primary selection = %v", got)
+	}
+	e.must(200, "PATCH", "/api/domains/"+cf["id"].(string), map[string]any{"is_primary": true})
+	e.must(422, "PATCH", "/api/domains/"+cf["id"].(string), map[string]any{"is_primary": false})
+	e.must(422, "PATCH", "/api/domains/"+cf["id"].(string), map[string]any{})
+	e.must(422, "PATCH", "/api/domains/"+d["id"].(string), map[string]any{"is_primary": true, "tls_mode": "invalid"})
+	e.must(404, "PATCH", "/api/domains/missing", map[string]any{"is_primary": true})
+	if px.applied != modeBase {
+		t.Fatal("primary selection reloaded the proxy")
+	}
+	px.err = nil
 	e.must(422, "PATCH", "/api/domains/"+cf["id"].(string), map[string]any{"tls_mode": ""})
 	if m := e.must(200, "PATCH", "/api/domains/"+cf["id"].(string), map[string]any{"tls_mode": "auto"}); m["tls_mode"] != "auto" || px.applied != modeBase+1 {
 		t.Fatalf("switch to auto = %v, applied %d", m, px.applied-modeBase)
@@ -285,7 +302,7 @@ func TestDomainsAPI(t *testing.T) {
 	e.must(200, "PUT", "/api/settings/panel", map[string]any{"domain": "panel.example.com"})
 	e.must(409, "POST", domains, map[string]any{"hostname": "panel.example.com"})
 
-	if got := e.list(domains); len(got) != 1 || got[0]["id"] != d["id"] {
+	if got := e.list(domains); len(got) != 1 || got[0]["id"] != d["id"] || got[0]["is_primary"] != true {
 		t.Fatalf("list = %v", got)
 	}
 

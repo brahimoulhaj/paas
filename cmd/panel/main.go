@@ -25,8 +25,10 @@ import (
 	"panel/internal/builder"
 	"panel/internal/config"
 	"panel/internal/deploy"
+	"panel/internal/dockermetrics"
 	"panel/internal/executor"
 	"panel/internal/gitsource"
+	"panel/internal/hostmetrics"
 	"panel/internal/proxy"
 	"panel/internal/secret"
 	"panel/internal/store"
@@ -223,6 +225,17 @@ func serve(ctx context.Context, cfg config.Config) error {
 	}
 
 	apiSrv := api.New(st, acc, log, version, webui.FS())
+	metrics := hostmetrics.New(hostmetrics.Options{DataDir: cfg.DataDir, ProcRoot: os.Getenv(brand.EnvPrefix() + "HOST_PROC")})
+	go metrics.Run(ctx)
+	apiSrv.SetHostMetrics(metrics)
+	metricsClient, err := client.New(client.FromEnv)
+	if err != nil {
+		return err
+	}
+	defer metricsClient.Close()
+	dockerMetrics := dockermetrics.New(metricsClient)
+	go dockerMetrics.Run(ctx)
+	apiSrv.SetDockerMetrics(dockerMetrics)
 	apiSrv.SetProxy(px)
 	apiSrv.SetDeployer(deployer)
 	apiSrv.SetGitSources(git)

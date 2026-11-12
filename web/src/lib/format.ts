@@ -1,6 +1,15 @@
 import type { App, Deployment } from './api'
 import { locale, tr } from './i18n'
 
+/** IEC byte units shared by host and Docker metrics. */
+export function formatBytes(value: number | null | undefined, rate = false): string {
+  if (value == null || value < 0) return '—'
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB']
+  const index = value > 0 ? Math.min(5, Math.max(0, Math.floor(Math.log(value) / Math.log(1024)))) : 0
+  const number = new Intl.NumberFormat(locale(), { maximumFractionDigits: index ? 1 : 0 }).format(value / 1024 ** index)
+  return `${number} ${units[index]}${rate ? '/s' : ''}`
+}
+
 /** "just now", "5 min ago", "3 h ago", "2 d ago", then a date. */
 export function timeAgo(iso: string | null): string {
   if (!iso) return '—'

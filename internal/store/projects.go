@@ -320,16 +320,17 @@ type Domain struct {
 	AppID     string
 	Hostname  string
 	TLSMode   string
+	IsPrimary bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
 
-const domainCols = `id, app_id, hostname, tls_mode, created_at, updated_at`
+const domainCols = `id, app_id, hostname, tls_mode, is_primary, created_at, updated_at`
 
 func scanDomain(row scanner) (Domain, error) {
 	var d Domain
 	var created, updated string
-	err := row.Scan(&d.ID, &d.AppID, &d.Hostname, &d.TLSMode, &created, &updated)
+	err := row.Scan(&d.ID, &d.AppID, &d.Hostname, &d.TLSMode, &d.IsPrimary, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Domain{}, ErrNotFound
 	}
@@ -353,8 +354,9 @@ func (s *Store) CreateDomain(ctx context.Context, appID, hostname, tlsMode strin
 	}
 	did, ts := id.New(), now()
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO domains (id, app_id, hostname, tls_mode, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		did, appID, hostname, tlsMode, ts, ts)
+		`INSERT INTO domains (id, app_id, hostname, tls_mode, is_primary, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, NOT EXISTS (SELECT 1 FROM domains WHERE app_id = ?), ?, ?)`,
+		did, appID, hostname, tlsMode, appID, ts, ts)
 	if err != nil {
 		return Domain{}, conflict(err)
 	}
@@ -372,7 +374,7 @@ func (s *Store) DomainExists(ctx context.Context, hostname string) (bool, error)
 }
 
 func (s *Store) ListDomains(ctx context.Context, appID string) ([]Domain, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+domainCols+` FROM domains WHERE app_id = ? ORDER BY hostname`, appID)
+	rows, err := s.db.QueryContext(ctx, `SELECT `+domainCols+` FROM domains WHERE app_id = ? ORDER BY is_primary DESC, hostname`, appID)
 	if err != nil {
 		return nil, err
 	}
@@ -388,12 +390,58 @@ func (s *Store) ListDomains(ctx context.Context, appID string) ([]Domain, error)
 	return out, rows.Err()
 }
 
-func (s *Store) SetDomainTLSMode(ctx context.Context, domainID, tlsMode string) error {
-	return affected(s.db.ExecContext(ctx, `UPDATE domains SET tls_mode = ?, updated_at = ? WHERE id = ?`, tlsMode, now(), domainID))
+// UpdateDomain atomically changes TLS mode and/or makes this domain the app's primary.
+// An empty TLS mode leaves it unchanged. Every app with domains retains one primary.
+func (s *Store) UpdateDomain(ctx context.Context, domainID, tlsMode string, makePrimary bool) (Domain, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Domain{}, err
+	}
+	defer tx.Rollback()
+	d, err := scanDomain(tx.QueryRowContext(ctx, `SELECT `+domainCols+` FROM domains WHERE id = ?`, domainID))
+	if err != nil {
+		return Domain{}, err
+	}
+	ts := now()
+	if makePrimary && !d.IsPrimary {
+		if _, err := tx.ExecContext(ctx, `UPDATE domains SET is_primary = 0, updated_at = ? WHERE app_id = ? AND is_primary = 1`, ts, d.AppID); err != nil {
+			return Domain{}, err
+		}
+		d.IsPrimary = true
+	}
+	if tlsMode != "" {
+		d.TLSMode = tlsMode
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE domains SET tls_mode = ?, is_primary = ?, updated_at = ? WHERE id = ?`, d.TLSMode, d.IsPrimary, ts, domainID); err != nil {
+		return Domain{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Domain{}, err
+	}
+	d.UpdatedAt = parseTime(ts)
+	return d, nil
 }
 
 func (s *Store) DeleteDomain(ctx context.Context, domainID string) error {
-	return affected(s.db.ExecContext(ctx, `DELETE FROM domains WHERE id = ?`, domainID))
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	d, err := scanDomain(tx.QueryRowContext(ctx, `SELECT `+domainCols+` FROM domains WHERE id = ?`, domainID))
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM domains WHERE id = ?`, domainID); err != nil {
+		return err
+	}
+	if d.IsPrimary {
+		if _, err := tx.ExecContext(ctx, `UPDATE domains SET is_primary = 1, updated_at = ? WHERE id =
+			(SELECT id FROM domains WHERE app_id = ? ORDER BY created_at, id LIMIT 1)`, now(), d.AppID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ProxyRoute is the routing state of one app that has domains.
