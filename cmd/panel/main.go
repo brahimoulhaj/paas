@@ -193,10 +193,12 @@ func serve(ctx context.Context, cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	go func() { // off the startup path: the first run pulls the Caddy image
+	proxyReady := make(chan struct{}) // deployments resumed after a restart wait for it
+	go func() {                       // off the startup path: the first run pulls the Caddy image
 		startCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		err := px.Start(startCtx)
 		cancel()
+		close(proxyReady) // even on failure: resumed deploys then fail like any other would
 		if err != nil {
 			log.Error("proxy not started; retrying in the background", "error", err)
 		} else {
@@ -236,11 +238,12 @@ func serve(ctx context.Context, cfg config.Config) error {
 	deployer := deploy.New(ctx, deploy.Options{
 		DataVolume: cfg.DataVolume, MaxBuilds: cfg.MaxBuilds,
 		Store: st, Executor: ex, Router: px, Builder: builds, GitAuth: git, DataDir: cfg.DataDir, Log: log,
+		Ready: proxyReady,
 	})
-	if n, err := deployer.Recover(ctx); err != nil {
+	if r, err := deployer.Recover(ctx); err != nil {
 		return err
-	} else if n > 0 {
-		log.Warn("deployments interrupted by the last shutdown were marked failed", "count", n)
+	} else if r != (deploy.Recovery{}) {
+		log.Info("deployments left by the last run picked up", "resumed", r.Resumed, "finished", r.Finished, "failed", r.Failed)
 	}
 
 	apiSrv := api.New(st, acc, log, version, webui.FS())

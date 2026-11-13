@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -71,6 +72,15 @@ type Options struct {
 	// MaxBuilds is how many Git builds run at once; 0 = 1. Further Git deploys stay queued
 	// until a build slot frees. Image pulls do not take a slot.
 	MaxBuilds int
+	// MaxAttempts is how many times a deployment may start; 0 = 3. A deployment the panel
+	// restarted under starts again from the beginning, up to this many times in all.
+	MaxAttempts int
+	// RetryDelays are the waits before each retry of a step that failed for a temporary
+	// reason (network) — a clone, a pull; nil = 2 s then 5 s. Its length is the retry count.
+	RetryDelays []time.Duration
+	// Ready, when set, holds back the deployments Recover resumes until it is closed — the
+	// proxy is up, so their traffic switch can work. New deploys do not wait.
+	Ready <-chan struct{}
 }
 
 type Service struct {
@@ -102,6 +112,12 @@ func New(ctx context.Context, opts Options) *Service {
 	}
 	if opts.MaxBuilds < 1 {
 		opts.MaxBuilds = 1
+	}
+	if opts.MaxAttempts < 1 {
+		opts.MaxAttempts = 3
+	}
+	if opts.RetryDelays == nil {
+		opts.RetryDelays = []time.Duration{2 * time.Second, 5 * time.Second}
 	}
 	return &Service{opts: opts, ctx: ctx, busy: map[string]bool{}, running: map[string]*cancellable{},
 		builds: make(chan struct{}, opts.MaxBuilds)}
@@ -155,14 +171,83 @@ func (s *Service) release(appID string) {
 	s.mu.Unlock()
 }
 
-// Recover closes deployments a previous panel process left unfinished. Call it once at
-// startup, before any new deploy.
-func (s *Service) Recover(ctx context.Context) (int, error) {
+// Recovery is what Recover did with the deployments a previous panel process left.
+type Recovery struct {
+	Resumed  int // queued again and started
+	Finished int // had already switched traffic: completed
+	Failed   int // started too many times, or their app is gone
+}
+
+// Recover picks up the deployments a previous panel process left unfinished. Call it once
+// at startup, before any new deploy. A queued deployment starts. A running one that had
+// not switched traffic yet starts again from the beginning, its half-made container
+// removed — unless it has already started MaxAttempts times, then it fails. A running one
+// that had switched traffic is completed: the old containers go, it is marked succeeded.
+func (s *Service) Recover(ctx context.Context) (Recovery, error) {
+	var r Recovery
 	// Workspaces of builds the previous process did not finish.
 	if err := os.RemoveAll(filepath.Join(s.opts.DataDir, "builds")); err != nil {
 		s.opts.Log.Error("remove old build workspaces", "error", err)
 	}
-	return s.opts.Store.FailUnfinishedDeployments(ctx, "interrupted: the panel restarted during this deployment")
+	st := s.opts.Store
+	deps, err := st.ListUnfinishedDeployments(ctx)
+	if err != nil {
+		return r, err
+	}
+	for _, dep := range deps {
+		app, err := st.GetApp(ctx, dep.AppID)
+		if err != nil {
+			if ferr := st.FinishDeployment(ctx, dep.ID, store.DeployFailed, "interrupted: the panel restarted during this deployment"); ferr != nil {
+				return r, ferr
+			}
+			r.Failed++
+			continue
+		}
+		logw := s.openLog(dep)
+		if dep.Status == store.DeployRunning && app.CurrentDeploymentID == dep.ID {
+			// Traffic had switched to the new container; only the cleanup was left.
+			logw.printf("The panel restarted after switching traffic; finishing")
+			s.removeOthers(ctx, app, dep.ContainerID, logw)
+			logw.printf("Deployment succeeded")
+			logw.close()
+			if err := st.FinishDeployment(ctx, dep.ID, store.DeploySucceeded, ""); err != nil {
+				return r, err
+			}
+			s.event(ctx, "deployment.succeeded", app, "")
+			r.Finished++
+			continue
+		}
+		if dep.Status == store.DeployRunning {
+			// The interrupted attempt may have created its container already.
+			if err := s.opts.Executor.RemoveContainer(ctx, containerName(app.ID, dep.ID), true); err != nil {
+				s.opts.Log.Error("remove interrupted deployment container", "deployment", dep.ID, "error", err)
+			}
+		}
+		if dep.Attempts >= s.opts.MaxAttempts {
+			msg := fmt.Sprintf("interrupted: the panel restarted during this deployment %d times", dep.Attempts)
+			logw.printf("Deployment failed: %s", msg)
+			logw.close()
+			if err := st.FinishDeployment(ctx, dep.ID, store.DeployFailed, msg); err != nil {
+				return r, err
+			}
+			s.event(ctx, "deployment.failed", app, msg)
+			r.Failed++
+			continue
+		}
+		logw.close()
+		if err := st.RequeueDeployment(ctx, dep.ID); err != nil {
+			return r, err
+		}
+		if dep, err = st.GetDeployment(ctx, dep.ID); err != nil {
+			return r, err
+		}
+		if !s.acquire(app.ID) {
+			continue // cannot happen: one unfinished deployment per app, and nothing else runs yet
+		}
+		s.start(app, dep, s.opts.Ready)
+		r.Resumed++
+	}
+	return r, nil
 }
 
 // Deploy records a deployment and runs it in the background. The returned record is
@@ -182,6 +267,14 @@ func (s *Service) Deploy(ctx context.Context, appID, trigger string) (store.Depl
 		s.release(appID)
 		return store.Deployment{}, err
 	}
+	s.start(app, dep, nil)
+	return dep, nil
+}
+
+// start runs dep in the background, once ready is closed (nil: at once). The caller holds
+// the app (acquire); it is released when the deployment ends. Shut down before ready, the
+// deployment stays queued.
+func (s *Service) start(app store.App, dep store.Deployment, ready <-chan struct{}) {
 	ctx, cancel := context.WithCancelCause(s.ctx)
 	s.mu.Lock()
 	s.running[dep.ID] = &cancellable{cancel: cancel}
@@ -189,16 +282,25 @@ func (s *Service) Deploy(ctx context.Context, appID, trigger string) (store.Depl
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
-		defer s.release(appID)
+		defer s.release(app.ID)
 		defer func() {
 			s.mu.Lock()
 			delete(s.running, dep.ID)
 			s.mu.Unlock()
 			cancel(nil)
 		}()
+		if ready != nil {
+			select {
+			case <-ready:
+			case <-ctx.Done():
+				if errors.Is(context.Cause(ctx), errCancelled) {
+					s.run(ctx, app, dep) // records the cancel
+				}
+				return
+			}
+		}
 		s.run(ctx, app, dep)
 	}()
-	return dep, nil
 }
 
 // run is one deployment from start to finish. Whatever happens, the record ends up
@@ -210,23 +312,31 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 
 	logw := s.openLog(dep)
 	defer logw.close()
+	if dep.Attempts > 0 {
+		logw.printf("The panel restarted during this deployment; starting again (attempt %d of %d)", dep.Attempts+1, s.opts.MaxAttempts)
+	}
 
 	fail := func(containerID string, err error) {
+		if containerID != "" {
+			if rmErr := ex.RemoveContainer(final, containerID, true); rmErr != nil {
+				s.opts.Log.Error("remove failed deployment container", "error", rmErr)
+			}
+		}
 		msg, status, action := err.Error(), store.DeployFailed, "deployment.failed"
 		switch {
 		case errors.Is(context.Cause(ctx), errCancelled):
 			msg, status, action = "cancelled by the user", store.DeployCancelled, "deployment.cancelled"
 			logw.printf("Deployment cancelled")
 		case ctx.Err() != nil:
-			msg = "cancelled: the panel is shutting down"
-			logw.printf("Deployment failed: %s", msg)
+			// Shutting down: back in the queue, Recover starts it again on the next start.
+			logw.printf("The panel is shutting down; this deployment starts again when it is back")
+			if err := st.RequeueDeployment(final, dep.ID); err != nil {
+				s.opts.Log.Error("requeue deployment", "error", err)
+			}
+			s.opts.Log.Info("deployment interrupted by shutdown, requeued", "app", app.Name, "deployment", dep.ID)
+			return
 		default:
 			logw.printf("Deployment failed: %s", msg)
-		}
-		if containerID != "" {
-			if rmErr := ex.RemoveContainer(final, containerID, true); rmErr != nil {
-				s.opts.Log.Error("remove failed deployment container", "error", rmErr)
-			}
 		}
 		if err := st.FinishDeployment(final, dep.ID, status, msg); err != nil {
 			s.opts.Log.Error("finish deployment", "error", err)
@@ -278,7 +388,7 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 		}
 	} else {
 		logw.printf("Deploying %s (image %s)", app.Name, app.Image)
-		if err := s.pull(ctx, image, logw); err != nil {
+		if err := s.retry(ctx, logw, "Pull", func() error { return s.pull(ctx, image, logw) }); err != nil {
 			fail("", err)
 			return
 		}
@@ -348,26 +458,8 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 		return
 	}
 
-	// 4. Remove every other container of this app. From here the deploy has succeeded;
-	// a leftover container is logged, not fatal, and the next deploy removes it.
-	if list, err := ex.ListContainers(final); err != nil {
-		logw.printf("Warning: could not list old containers: %v", err)
-	} else {
-		for _, c := range list {
-			if c.Kind != executor.KindApp || c.ResourceID != app.ID || c.ID == containerID {
-				continue
-			}
-			logw.printf("Removing old container %s", c.Name)
-			if c.Running {
-				if err := ex.StopContainer(final, c.ID, s.opts.StopGrace); err != nil {
-					logw.printf("Warning: stop %s: %v", c.Name, err)
-				}
-			}
-			if err := ex.RemoveContainer(final, c.ID, true); err != nil {
-				logw.printf("Warning: remove %s: %v", c.Name, err)
-			}
-		}
-	}
+	// 4. Remove every other container of this app. From here the deploy has succeeded.
+	s.removeOthers(final, app, containerID, logw)
 
 	s.pruneImages(final, app.ID, image, logw)
 
@@ -379,6 +471,79 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 	}
 	s.event(final, "deployment.succeeded", app, "")
 	s.opts.Log.Info("deployment succeeded", "app", app.Name, "deployment", dep.ID)
+}
+
+// retry runs step, and runs it again after each of RetryDelays while it fails for a
+// temporary reason (see temporary). Other errors, and a cancel, return at once.
+func (s *Service) retry(ctx context.Context, logw *logWriter, what string, step func() error) error {
+	for i := 0; ; i++ {
+		err := step()
+		if err == nil || ctx.Err() != nil || i >= len(s.opts.RetryDelays) || !temporary(err) {
+			return err
+		}
+		wait := s.opts.RetryDelays[i]
+		logw.printf("%s failed for what looks like a temporary reason: %v", what, err)
+		logw.printf("Trying again in %s (retry %d of %d)", wait, i+1, len(s.opts.RetryDelays))
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+}
+
+// temporaryMarks are error texts of network trouble that often passes: DNS hiccups,
+// dropped or refused connections, timeouts, a registry or Git host briefly overloaded.
+// Missing images, bad credentials and unknown branches are not among them.
+var temporaryMarks = []string{
+	"temporary failure in name resolution", "could not resolve host", "no such host",
+	"i/o timeout", "timeout awaiting", "tls handshake timeout", "connection timed out", "operation timed out",
+	"connection reset", "connection refused", "broken pipe", "unexpected eof", "early eof",
+	"the remote end hung up unexpectedly", "rpc failed",
+	"502 bad gateway", "503 service unavailable", "504 gateway", "returned error: 502", "returned error: 503", "returned error: 504",
+}
+
+// temporary reports whether err looks like network trouble worth another try.
+func temporary(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	for _, m := range temporaryMarks {
+		if strings.Contains(msg, m) {
+			return true
+		}
+	}
+	return false
+}
+
+// removeOthers removes every container of the app but keep. A leftover container is
+// logged, not fatal: the next deploy removes it.
+func (s *Service) removeOthers(ctx context.Context, app store.App, keep string, logw *logWriter) {
+	ex := s.opts.Executor
+	list, err := ex.ListContainers(ctx)
+	if err != nil {
+		logw.printf("Warning: could not list old containers: %v", err)
+		return
+	}
+	for _, c := range list {
+		if c.Kind != executor.KindApp || c.ResourceID != app.ID || c.ID == keep {
+			continue
+		}
+		logw.printf("Removing old container %s", c.Name)
+		if c.Running {
+			if err := ex.StopContainer(ctx, c.ID, s.opts.StopGrace); err != nil {
+				logw.printf("Warning: stop %s: %v", c.Name, err)
+			}
+		}
+		if err := ex.RemoveContainer(ctx, c.ID, true); err != nil {
+			logw.printf("Warning: remove %s: %v", c.Name, err)
+		}
+	}
 }
 
 // pull pulls an image, logging one line per layer per status change.
@@ -422,13 +587,23 @@ func (s *Service) build(ctx, final context.Context, app store.App, dep store.Dep
 		if s.opts.GitAuth == nil {
 			return "", errors.New("this panel cannot fetch private repositories")
 		}
-		var err error
-		if auth, err = s.opts.GitAuth.Credentials(ctx, src.ConnectionID, src.Repository); err != nil {
+		err := s.retry(ctx, logw, "Git connection", func() (err error) {
+			auth, err = s.opts.GitAuth.Credentials(ctx, src.ConnectionID, src.Repository)
+			return err
+		})
+		if err != nil {
 			return "", fmt.Errorf("git connection: %w", err)
 		}
 	}
 	logw.printf("Fetching branch %s", src.Branch)
-	commit, err := s.opts.Builder.Fetch(ctx, src, auth, dir, out)
+	var commit string
+	err := s.retry(ctx, logw, "Fetch", func() (err error) {
+		if err := os.RemoveAll(dir); err != nil { // a clone needs an empty place
+			return err
+		}
+		commit, err = s.opts.Builder.Fetch(ctx, src, auth, dir, out)
+		return err
+	})
 	if err != nil {
 		return "", err
 	}

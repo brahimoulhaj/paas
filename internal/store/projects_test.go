@@ -110,14 +110,26 @@ func TestProjectsAppsDomains(t *testing.T) {
 		t.Fatalf("finished deployment = %+v", got)
 	}
 
-	// Unfinished attempts are closed on restart; finished ones are left alone.
+	// Unfinished attempts are listed for a restart and can be queued again, counting starts;
+	// finished ones are left alone.
 	open1, _ := s.CreateDeployment(ctx, a.ID, "manual", a.Image, a.Port, func(string) string { return "" })
-	n, err := s.FailUnfinishedDeployments(ctx, "interrupted")
-	if err != nil || n != 1 {
-		t.Fatalf("FailUnfinished = %d, %v", n, err)
+	if err := s.MarkDeploymentRunning(ctx, open1.ID); err != nil {
+		t.Fatal(err)
 	}
-	if got, _ := s.GetDeployment(ctx, open1.ID); got.Status != DeployFailed || got.Error != "interrupted" {
-		t.Fatalf("interrupted deployment = %+v", got)
+	if err := s.SetDeploymentContainer(ctx, open1.ID, "c1", "app-web-2"); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := s.ListUnfinishedDeployments(ctx); err != nil || len(list) != 1 || list[0].ID != open1.ID || list[0].Attempts != 1 {
+		t.Fatalf("unfinished = %+v, %v", list, err)
+	}
+	if err := s.RequeueDeployment(ctx, open1.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.GetDeployment(ctx, open1.ID); got.Status != DeployQueued || got.ContainerName != "" || got.Attempts != 1 {
+		t.Fatalf("requeued deployment = %+v", got)
+	}
+	if err := s.RequeueDeployment(ctx, dep.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("requeue of a finished deployment = %v", err)
 	}
 	if list, _ := s.ListDeployments(ctx, a.ID, 10); len(list) != 2 || list[0].ID != open1.ID {
 		t.Fatalf("deployments newest first = %+v", list)

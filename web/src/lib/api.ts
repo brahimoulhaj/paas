@@ -160,6 +160,8 @@ export type Deployment = {
   port: number
   container_name: string
   error: string
+  /** How many times it has started; above 1 when a panel restart interrupted it. */
+  attempts: number
   started_at: string | null
   finished_at: string | null
   created_at: string

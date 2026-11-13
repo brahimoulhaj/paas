@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build (Railpack and GitLab work on the VPS, 2026-11-13; a single-module Gradle app needs a start command); try build caps (`BERTH_BUILD_CPUS`, `BERTH_BUILD_MEMORY_MB`); then retries / resume after restart for the queue. Time a fresh install.
+**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build (Railpack and GitLab work on the VPS, 2026-11-13; a single-module Gradle app needs a start command); try build caps (Settings → Builds) and a panel update during a deploy (it should resume). Then the build log stream on the deployment page, deploy keys, private registries. Time a fresh install.
 
 ---
 
@@ -87,7 +87,7 @@ Verified by `internal/executor/docker_test.go` against a real daemon (skipped wi
 - [x] Container create / start / stop / remove / inspect, with labels identifying panel-managed containers (`berth.managed`, `berth.kind`, `berth.resource`); json-file log rotation 10 MB × 3
 - [x] Container log streaming (follow, tail, since), stdout and stderr demultiplexed
 - [x] CPU and memory limits
-- [x] Reconcile on startup: adopt running managed containers (proxy and apps), log orphans; unfinished deployments are marked failed
+- [x] Reconcile on startup: adopt running managed containers (proxy and apps), log orphans; unfinished deployments are resumed (see Jobs and queue)
 
 ### Proxy (`internal/proxy`)
 Verified by `internal/proxy/manager_test.go` against a real Caddy container (skipped with `-short` or when no daemon answers).
@@ -180,8 +180,8 @@ Goal: push-to-deploy from a repository with any of the builders.
 - [ ] Push to the configured registry after a build
 
 ### Jobs and queue (`internal/jobs`)
-- [ ] SQLite-backed job queue with retries and resume after restart
-- [x] One build at a time by default, configurable — `BERTH_MAX_BUILDS`; a Git deploy waits, still `queued`, for a build slot and says so in its log; the slot is released once the image exists (pulls take none). In memory: a restart fails queued deploys like running ones (`TestBuildsRunOneAtATime`, `TestMaxBuildsRunsInParallel`)
+- [x] SQLite-backed job queue with retries and resume after restart — the `deployments` table is the queue (a generic jobs table can come with backups and cron). On startup, queued deploys start again; a running one that had not switched traffic starts over, its half-made container removed; one that had switched is finished (old containers removed, succeeded); at most 3 starts per deploy (`attempts`, `0009_deployment_attempts.sql`). A shutdown puts running and waiting deploys back in the queue instead of failing them. Resumed deploys wait for the proxy. Clone, pull and Git credentials are retried twice (2 s, 5 s) on network errors; builds are not. `TestRecoverResumesDeployments`, `TestShutdownRequeues`, `TestRetryTemporaryFailures`, `TestTemporary`; checked against real Docker and Caddy: panel stopped mid-clone, deploy resumed at attempt 2 and succeeded (2026-11-13)
+- [x] One build at a time by default, configurable — `BERTH_MAX_BUILDS`; a Git deploy waits, still `queued`, for a build slot and says so in its log; the slot is released once the image exists (pulls take none). Queued deploys survive a restart (below) (`TestBuildsRunOneAtATime`, `TestMaxBuildsRunsInParallel`)
 - [x] CPU and memory caps on builds — Settings → Builds (`GET/PUT/DELETE /api/settings/builds`, `TestBuildSettings`; checked in a browser: save, invalid memory, reset), defaults from `BERTH_BUILD_CPUS`, `BERTH_BUILD_MEMORY_MB` (unset = no cap); read at the start of every build, shared by all builds; Docker's built-in BuildKit ignores per-build limits, so capped builds run on a buildx `docker-container` builder (`moby/buildkit:v0.34.2`) created with the limits on first use and replaced when they change (an old one is removed once no build runs on it); Railpack's label step stays on the daemon's builder, which holds the loaded image. `TestBuildLimits` (stub), `TestBuildMemoryCapEnforced` (real daemon: a 400 MB step killed under a 256 MB cap). Not yet tried on the VPS
 - [x] Cancel a queued or running build — `POST /api/deployments/{id}/cancel` and a Cancel button on the deployment log; works until traffic switches (then 409 `not_cancellable`); the build or pull is killed, a new container removed, the live version keeps serving; status `cancelled`, event `deployment.cancelled` (`TestCancelDeployment`). Not yet clicked in a browser
 - [ ] Cron scheduler (`robfig/cron`)
@@ -208,7 +208,7 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 ### State machine (`internal/deploy`)
 - [ ] States: `queued → building → starting → health_checking → switching → draining → succeeded`
 - [ ] Exits: `failed`, `cancelled`, `rolled_back`
-- [ ] Resume or fail cleanly after a panel restart mid-deploy; no orphan containers
+- [x] Resume or fail cleanly after a panel restart mid-deploy; no orphan containers — see Jobs and queue (M2); per-state resume comes with the state machine
 
 ### Health checks
 - [ ] Migration: `app_health_checks`, `volumes`, `certificates`

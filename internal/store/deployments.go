@@ -34,6 +34,7 @@ type Deployment struct {
 	ContainerName string
 	Error         string
 	LogPath       string    // relative to the data dir
+	Attempts      int       // how many times it has started; more than 1 after a panel restart
 	StartedAt     time.Time // zero until it starts
 	FinishedAt    time.Time // zero until it ends
 	CreatedAt     time.Time
@@ -41,13 +42,13 @@ type Deployment struct {
 }
 
 const deploymentCols = `id, app_id, status, trigger, image, commit_sha, port, container_id, container_name, error, log_path,
-	COALESCE(started_at, ''), COALESCE(finished_at, ''), created_at, updated_at`
+	COALESCE(started_at, ''), COALESCE(finished_at, ''), created_at, updated_at, attempts`
 
 func scanDeployment(row scanner) (Deployment, error) {
 	var d Deployment
 	var started, finished, created, updated string
 	err := row.Scan(&d.ID, &d.AppID, &d.Status, &d.Trigger, &d.Image, &d.CommitSHA, &d.Port, &d.ContainerID, &d.ContainerName, &d.Error, &d.LogPath,
-		&started, &finished, &created, &updated)
+		&started, &finished, &created, &updated, &d.Attempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -93,10 +94,22 @@ func (s *Store) ListDeployments(ctx context.Context, appID string, limit int) ([
 	return out, rows.Err()
 }
 
+// MarkDeploymentRunning records that an attempt has started, and counts it.
 func (s *Store) MarkDeploymentRunning(ctx context.Context, deploymentID string) error {
 	ts := now()
 	return affected(s.db.ExecContext(ctx,
-		`UPDATE deployments SET status = ?, started_at = ?, updated_at = ? WHERE id = ?`, DeployRunning, ts, ts, deploymentID))
+		`UPDATE deployments SET status = ?, started_at = ?, attempts = attempts + 1, updated_at = ? WHERE id = ?`,
+		DeployRunning, ts, ts, deploymentID))
+}
+
+// RequeueDeployment puts an unfinished deployment back in the queue, to start again from
+// the beginning: the container of the interrupted attempt is forgotten (the caller removes
+// it). A finished deployment is left alone (ErrNotFound).
+func (s *Store) RequeueDeployment(ctx context.Context, deploymentID string) error {
+	return affected(s.db.ExecContext(ctx,
+		`UPDATE deployments SET status = ?, container_id = '', container_name = '', error = '', updated_at = ?
+		 WHERE id = ? AND status IN (?, ?)`,
+		DeployQueued, now(), deploymentID, DeployQueued, DeployRunning))
 }
 
 // SetDeploymentCommit records the commit a Git deployment is building.
@@ -125,18 +138,24 @@ func (s *Store) FinishDeployment(ctx context.Context, deploymentID, status, errM
 		status, errMsg, ts, ts, deploymentID))
 }
 
-// FailUnfinishedDeployments closes attempts a previous panel process left open; nothing is
-// running them any more. It returns how many it closed.
-func (s *Store) FailUnfinishedDeployments(ctx context.Context, reason string) (int, error) {
-	ts := now()
-	res, err := s.db.ExecContext(ctx,
-		`UPDATE deployments SET status = ?, error = ?, finished_at = ?, updated_at = ? WHERE status IN (?, ?)`,
-		DeployFailed, reason, ts, ts, DeployQueued, DeployRunning)
+// ListUnfinishedDeployments returns the deployments that are queued or running, oldest
+// first. At startup these are the ones a previous panel process left behind.
+func (s *Store) ListUnfinishedDeployments(ctx context.Context) ([]Deployment, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+deploymentCols+` FROM deployments WHERE status IN (?, ?) ORDER BY id`, DeployQueued, DeployRunning)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	n, _ := res.RowsAffected()
-	return int(n), nil
+	defer rows.Close()
+	out := []Deployment{}
+	for rows.Next() {
+		d, err := scanDeployment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
 }
 
 // CountActiveDeployments counts deployments that are queued or running right now.

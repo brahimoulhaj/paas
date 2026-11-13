@@ -87,8 +87,9 @@ func newEnv(t *testing.T) *env {
 		router: &fakeRouter{known: map[string]bool{}, upstreams: map[string][]string{}}}
 	e.svc = New(ctx, Options{
 		Store: st, Executor: e.ex, Router: e.router, DataDir: dir,
-		Log:        slog.New(slog.NewTextHandler(io.Discard, nil)),
-		StartGrace: 20 * time.Millisecond,
+		Log:         slog.New(slog.NewTextHandler(io.Discard, nil)),
+		StartGrace:  20 * time.Millisecond,
+		RetryDelays: []time.Duration{time.Millisecond, time.Millisecond},
 	})
 	return e
 }
@@ -358,48 +359,230 @@ func TestRemove(t *testing.T) {
 	}
 }
 
-func TestRecoverAndShutdown(t *testing.T) {
-	e, ctx := newEnv(t), context.Background()
-	stale, _ := e.st.CreateDeployment(ctx, e.app.ID, "manual", "nginx:1", 80, func(string) string { return "" })
-	n, err := e.svc.Recover(ctx)
-	if err != nil || n != 1 {
-		t.Fatalf("Recover = %d, %v", n, err)
+// imageApp adds another image app to the project.
+func (e *env) imageApp(name string) store.App {
+	e.t.Helper()
+	a, err := e.st.CreateApp(context.Background(), e.app.ProjectID, store.AppInput{Name: name, Image: "nginx:1", Port: 80})
+	if err != nil {
+		e.t.Fatal(err)
 	}
-	if got, _ := e.st.GetDeployment(ctx, stale.ID); got.Status != store.DeployFailed || !strings.Contains(got.Error, "restarted") {
-		t.Errorf("stale deployment = %+v", got)
+	return a
+}
+
+// leftOpen records a deployment as a previous panel process left it: queued, or running
+// (started `starts` times) with its container created when withContainer is set.
+func (e *env) leftOpen(app store.App, starts int, withContainer bool) store.Deployment {
+	e.t.Helper()
+	ctx := context.Background()
+	dep, err := e.st.CreateDeployment(ctx, app.ID, "manual", app.Image, app.Port, func(id string) string {
+		return filepath.Join("deployments", app.ID, id+".log")
+	})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for range starts {
+		if err := e.st.MarkDeploymentRunning(ctx, dep.ID); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+	if withContainer {
+		name := containerName(app.ID, dep.ID)
+		id, err := e.ex.CreateContainer(ctx, executor.ContainerSpec{Name: name, Image: app.Image, Kind: executor.KindApp, ResourceID: app.ID})
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		if err := e.st.SetDeploymentContainer(ctx, dep.ID, id, name); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+	got, _ := e.st.GetDeployment(ctx, dep.ID)
+	return got
+}
+
+func (e *env) log(dep store.Deployment) string {
+	raw, _ := os.ReadFile(e.svc.LogPath(dep))
+	return string(raw)
+}
+
+func TestRecoverResumesDeployments(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	queued := e.leftOpen(e.app, 0, false)                 // never started
+	interrupted := e.leftOpen(e.imageApp("api"), 1, true) // cut off before the switch, container made
+	exhausted := e.leftOpen(e.imageApp("cron"), 3, false) // the panel restarted under it 3 times
+
+	// Cut off after the switch: the app already serves it, an older container still runs.
+	switchedApp := e.imageApp("docs")
+	old := e.leftOpen(switchedApp, 1, true)
+	if err := e.st.FinishDeployment(ctx, old.ID, store.DeploySucceeded, ""); err != nil {
+		t.Fatal(err)
+	}
+	switched := e.leftOpen(switchedApp, 1, true)
+	if err := e.st.SetAppCurrentDeployment(ctx, switchedApp.ID, switched.ID, store.StateRunning); err != nil {
+		t.Fatal(err)
 	}
 
-	// A deploy cut short by shutdown records that, and leaves no container.
-	runCtx, cancel := context.WithCancel(ctx)
-	svc := New(runCtx, Options{Store: e.st, Executor: e.ex, DataDir: e.dir, Log: slog.New(slog.NewTextHandler(io.Discard, nil))})
-	e.ex.PullDelay = 5 * time.Second
-	dep, err := svc.Deploy(ctx, e.app.ID, "manual")
+	ready := make(chan struct{})
+	e.svc.opts.Ready = ready
+	r, err := e.svc.Recover(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if r != (Recovery{Resumed: 2, Finished: 1, Failed: 1}) {
+		t.Fatalf("Recover = %+v", r)
+	}
+	// The interrupted attempt's container is gone at once; the resumed ones wait for Ready.
+	for _, c := range e.containers() {
+		if c.Name == interrupted.ContainerName || c.Name == old.ContainerName {
+			t.Errorf("container %s left after Recover", c.Name)
+		}
+	}
+	time.Sleep(30 * time.Millisecond)
+	for _, d := range []store.Deployment{queued, interrupted} {
+		if got, _ := e.st.GetDeployment(ctx, d.ID); got.Status != store.DeployQueued {
+			t.Fatalf("%s started before Ready: %s", d.ID, got.Status)
+		}
+	}
+	close(ready)
+	e.svc.Wait()
+
+	if d := e.waitStatus(queued.ID, store.DeploySucceeded); d.Attempts != 1 {
+		t.Errorf("queued: %+v", d)
+	}
+	d := e.waitStatus(interrupted.ID, store.DeploySucceeded)
+	if d.Attempts != 2 || d.ContainerName == "" || !strings.Contains(e.log(d), "starting again (attempt 2 of 3)") {
+		t.Errorf("interrupted: %+v\n%s", d, e.log(d))
+	}
+	if d := e.waitStatus(exhausted.ID, store.DeployFailed); !strings.Contains(d.Error, "restarted during this deployment 3 times") {
+		t.Errorf("exhausted: %+v", d)
+	}
+	if d := e.waitStatus(switched.ID, store.DeploySucceeded); !strings.Contains(e.log(d), "after switching traffic") {
+		t.Errorf("switched: %+v\n%s", d, e.log(d))
+	}
+	var names []string
+	for _, c := range e.containers() {
+		if c.ResourceID == switchedApp.ID {
+			names = append(names, c.Name)
+		}
+	}
+	if len(names) != 1 || names[0] != switched.ContainerName {
+		t.Errorf("containers of the switched app = %v, want only %s", names, switched.ContainerName)
+	}
+}
+
+func TestShutdownRequeues(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	b := &fakeBuilder{commit: strings.Repeat("a", 40), gate: make(chan struct{}), started: make(chan string, 4)}
+	e.useGit(b)
+	other := e.gitApp("api")
+
+	// One deploy builds, one waits for the build slot; then the panel shuts down.
+	runCtx, cancel := context.WithCancel(ctx)
+	svc := New(runCtx, Options{Store: e.st, Executor: e.ex, Router: e.router, Builder: b, DataDir: e.dir,
+		Log: e.svc.opts.Log, StartGrace: 20 * time.Millisecond})
+	building, err := svc.Deploy(ctx, e.app.ID, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-b.started
+	waiting, err := svc.Deploy(ctx, other.ID, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(e.log(waiting), "Waiting for a running build") {
+		if time.Now().After(deadline) {
+			t.Fatal("second deploy never waited for the slot")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	cancel()
 	svc.Wait()
-	got, _ := e.st.GetDeployment(ctx, dep.ID)
-	if got.Status != store.DeployFailed || !strings.Contains(got.Error, "shutting down") {
-		t.Errorf("cancelled deployment = %+v", got)
+	for _, d := range []store.Deployment{building, waiting} {
+		got, _ := e.st.GetDeployment(ctx, d.ID)
+		if got.Status != store.DeployQueued || got.Error != "" || !strings.Contains(e.log(got), "starts again when it is back") {
+			t.Errorf("after shutdown: %+v\n%s", got, e.log(got))
+		}
 	}
 	if cs := e.containers(); len(cs) != 0 {
-		t.Errorf("containers after cancelled deploy = %+v", cs)
+		t.Errorf("containers after shutdown = %+v", cs)
+	}
+
+	// The next start picks both up.
+	close(b.gate)
+	e.svc.opts.Builder = b
+	if r, err := e.svc.Recover(ctx); err != nil || r.Resumed != 2 {
+		t.Fatalf("Recover = %+v, %v", r, err)
+	}
+	e.svc.Wait()
+	e.waitStatus(building.ID, store.DeploySucceeded)
+	e.waitStatus(waiting.ID, store.DeploySucceeded)
+}
+
+func TestRetryTemporaryFailures(t *testing.T) {
+	e := newEnv(t)
+	b := &fakeBuilder{commit: strings.Repeat("a", 40)}
+	e.useGit(b)
+
+	// Two network failures, then the clone works: retried, deployed.
+	b.fetchErr = errors.New("git clone: exit status 128: fatal: unable to access 'https://example.com/': Could not resolve host: example.com")
+	b.fetchFails = 2
+	dep := e.deploy()
+	if dep.Status != store.DeploySucceeded || len(b.dirs) != 3 {
+		t.Fatalf("after 2 temporary failures: %+v, %d fetches\n%s", dep, len(b.dirs), e.log(dep))
+	}
+	if l := e.log(dep); strings.Count(l, "Trying again in") != 2 || !strings.Contains(l, "retry 2 of 2") {
+		t.Errorf("log:\n%s", l)
+	}
+
+	// Three in a row: out of retries.
+	b.dirs, b.failed, b.fetchFails = nil, 0, 3
+	if dep := e.deploy(); dep.Status != store.DeployFailed || len(b.dirs) != 3 || !strings.Contains(dep.Error, "Could not resolve host") {
+		t.Errorf("3 temporary failures: %+v, %d fetches", dep, len(b.dirs))
+	}
+
+	// A lasting failure is not retried.
+	b.dirs, b.failed, b.fetchFails = nil, 0, 1
+	b.fetchErr = errors.New("git clone: exit status 128: fatal: Remote branch main not found in upstream origin")
+	if dep := e.deploy(); dep.Status != store.DeployFailed || len(b.dirs) != 1 {
+		t.Errorf("lasting failure: %+v, %d fetches", dep, len(b.dirs))
+	}
+}
+
+func TestTemporary(t *testing.T) {
+	for msg, want := range map[string]bool{
+		"Could not resolve host: github.com":                                        true,
+		"dial tcp: lookup registry-1.docker.io: no such host":                       true,
+		"Get \"https://registry-1.docker.io/v2/\": net/http: TLS handshake timeout": true,
+		"read tcp 10.0.0.2:443: connection reset by peer":                           true,
+		"error: RPC failed; curl 56 GnuTLS recv error":                              true,
+		"The requested URL returned error: 503":                                     true,
+		"pull nginx:nope: manifest unknown":                                         false,
+		"Authentication failed for 'https://gitlab.com/org/app.git/'":               false,
+		"Remote branch dev not found in upstream origin":                            false,
+	} {
+		if got := temporary(errors.New(msg)); got != want {
+			t.Errorf("temporary(%q) = %v, want %v", msg, got, want)
+		}
+	}
+	if temporary(context.Canceled) {
+		t.Error("a cancel is not temporary")
 	}
 }
 
 // fakeBuilder "clones" by creating the workspace and "builds" by recording the tag.
 type fakeBuilder struct {
-	mu       sync.Mutex
-	commit   string
-	fetchErr error
-	buildErr error
-	auth     builder.Auth       // credentials of the last fetch
-	dirs     []string           // workspaces it was given
-	tags     []string           // images it built
-	images   *executortest.Fake // when set, built images are recorded there
-	gate     chan struct{}      // when set, a build waits for a value (or its context)
-	started  chan string        // when set, receives each tag as its build starts
+	mu         sync.Mutex
+	commit     string
+	fetchErr   error
+	fetchFails int // when set, only this many fetches fail with fetchErr
+	failed     int // fetches failed so far
+	buildErr   error
+	auth       builder.Auth       // credentials of the last fetch
+	dirs       []string           // workspaces it was given
+	tags       []string           // images it built
+	images     *executortest.Fake // when set, built images are recorded there
+	gate       chan struct{}      // when set, a build waits for a value (or its context)
+	started    chan string        // when set, receives each tag as its build starts
 }
 
 func (b *fakeBuilder) Fetch(_ context.Context, src store.GitSource, auth builder.Auth, dir string, line builder.LineFunc) (string, error) {
@@ -411,7 +594,8 @@ func (b *fakeBuilder) Fetch(_ context.Context, src store.GitSource, auth builder
 		return "", err
 	}
 	line("Cloning into '" + dir + "'...")
-	if b.fetchErr != nil {
+	if b.fetchErr != nil && (b.fetchFails == 0 || b.failed < b.fetchFails) {
+		b.failed++
 		return "", b.fetchErr
 	}
 	return b.commit, nil

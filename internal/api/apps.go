@@ -111,6 +111,7 @@ type deploymentJSON struct {
 	Port          int        `json:"port"`
 	ContainerName string     `json:"container_name"`
 	Error         string     `json:"error"`
+	Attempts      int        `json:"attempts"` // starts; above 1 when a panel restart interrupted it
 	StartedAt     *time.Time `json:"started_at"`
 	FinishedAt    *time.Time `json:"finished_at"`
 	CreatedAt     time.Time  `json:"created_at"`
@@ -119,7 +120,7 @@ type deploymentJSON struct {
 func toDeploymentJSON(d store.Deployment) deploymentJSON {
 	out := deploymentJSON{
 		ID: d.ID, AppID: d.AppID, Status: d.Status, Trigger: d.Trigger, Image: d.Image, CommitSHA: d.CommitSHA, Port: d.Port,
-		ContainerName: d.ContainerName, Error: d.Error, CreatedAt: d.CreatedAt,
+		ContainerName: d.ContainerName, Error: d.Error, Attempts: d.Attempts, CreatedAt: d.CreatedAt,
 	}
 	if !d.StartedAt.IsZero() {
 		out.StartedAt = &d.StartedAt
