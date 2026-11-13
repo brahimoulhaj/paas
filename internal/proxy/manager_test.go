@@ -97,7 +97,7 @@ func newStack(t *testing.T) *stack {
 		t.Fatal(err)
 	}
 	for _, img := range []string{backendImage, caddyImage} {
-		if err := ex.PullImage(ctx, img, nil); err != nil {
+		if err := ex.PullImage(ctx, img, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

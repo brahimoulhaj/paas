@@ -137,6 +137,7 @@ type App struct {
 	Name                string
 	SourceType          string
 	Image               string
+	RegistryID          string // registry an image app is pulled from with credentials; "" = public
 	StartCommand        string // replaces the image's entrypoint and command, run by /bin/sh -c; "" = the image's own
 	Port                int
 	CPULimit            float64
@@ -150,7 +151,7 @@ type App struct {
 
 const appCols = `id, project_id, name, source_type, image, port, cpu_limit, memory_limit_mb,
 	desired_state, COALESCE(current_deployment_id, ''),
-	git_repository, git_branch, builder, build_context, dockerfile_path, COALESCE(git_source_id, ''), environment, created_at, updated_at, mounts, start_command`
+	git_repository, git_branch, builder, build_context, dockerfile_path, COALESCE(git_source_id, ''), environment, created_at, updated_at, mounts, start_command, COALESCE(registry_id, '')`
 
 func (s *Store) scanApp(row scanner) (App, error) {
 	var a App
@@ -158,7 +159,7 @@ func (s *Store) scanApp(row scanner) (App, error) {
 	var created, updated string
 	err := row.Scan(&a.ID, &a.ProjectID, &a.Name, &a.SourceType, &a.Image, &a.Port, &a.CPULimit, &a.MemoryMB,
 		&a.DesiredState, &a.CurrentDeploymentID,
-		&a.Git.Repository, &a.Git.Branch, &a.Git.Builder, &a.Git.BuildContext, &a.Git.Dockerfile, &a.Git.ConnectionID, &environment, &created, &updated, &mounts, &a.StartCommand)
+		&a.Git.Repository, &a.Git.Branch, &a.Git.Builder, &a.Git.BuildContext, &a.Git.Dockerfile, &a.Git.ConnectionID, &environment, &created, &updated, &mounts, &a.StartCommand, &a.RegistryID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return App{}, ErrNotFound
 	}
@@ -211,6 +212,7 @@ type AppInput struct {
 	Name         string
 	SourceType   string
 	Image        string
+	RegistryID   string // image apps: private registry to pull from; "" = public
 	Git          GitSource
 	StartCommand string
 	Port         int
@@ -221,7 +223,7 @@ type AppInput struct {
 // normalized empties the fields the source type does not use.
 func (in AppInput) normalized() AppInput {
 	if in.SourceType == SourceGit {
-		in.Image = ""
+		in.Image, in.RegistryID = "", ""
 	} else {
 		in.SourceType, in.Git = SourceImage, GitSource{}
 	}
@@ -241,10 +243,10 @@ func (s *Store) CreateApp(ctx context.Context, projectID string, in AppInput) (A
 	aid, ts := id.New(), now()
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO apps (id, project_id, name, source_type, image, port, cpu_limit, memory_limit_mb, desired_state,
-			git_repository, git_branch, builder, build_context, dockerfile_path, git_source_id, environment, created_at, updated_at, mounts, start_command)
-		SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ? FROM projects WHERE id = ?`,
+			git_repository, git_branch, builder, build_context, dockerfile_path, git_source_id, environment, created_at, updated_at, mounts, start_command, registry_id)
+		SELECT ?, id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, NULLIF(?, '') FROM projects WHERE id = ?`,
 		aid, in.Name, in.SourceType, in.Image, in.Port, in.CPULimit, in.MemoryMB, StateStopped,
-		in.Git.Repository, in.Git.Branch, in.Git.Builder, in.Git.BuildContext, in.Git.Dockerfile, in.Git.ConnectionID, string(environment), ts, ts, string(mounts), in.StartCommand, projectID)
+		in.Git.Repository, in.Git.Branch, in.Git.Builder, in.Git.BuildContext, in.Git.Dockerfile, in.Git.ConnectionID, string(environment), ts, ts, string(mounts), in.StartCommand, in.RegistryID, projectID)
 	if err != nil {
 		return App{}, conflict(err)
 	}
@@ -291,10 +293,11 @@ func (s *Store) UpdateApp(ctx context.Context, appID string, in AppInput) (App, 
 	err = affected(s.db.ExecContext(ctx, `
 		UPDATE apps SET name = ?, source_type = ?, image = ?, port = ?, cpu_limit = ?, memory_limit_mb = ?,
 			git_repository = ?, git_branch = ?, builder = ?, build_context = ?, dockerfile_path = ?,
-			git_source_id = NULLIF(?, ''), environment = ?, updated_at = ?, mounts = ?, start_command = ?
+			git_source_id = NULLIF(?, ''), environment = ?, updated_at = ?, mounts = ?, start_command = ?,
+			registry_id = NULLIF(?, '')
 		WHERE id = ?`,
 		in.Name, in.SourceType, in.Image, in.Port, in.CPULimit, in.MemoryMB,
-		in.Git.Repository, in.Git.Branch, in.Git.Builder, in.Git.BuildContext, in.Git.Dockerfile, in.Git.ConnectionID, string(environment), now(), string(mounts), in.StartCommand, appID))
+		in.Git.Repository, in.Git.Branch, in.Git.Builder, in.Git.BuildContext, in.Git.Dockerfile, in.Git.ConnectionID, string(environment), now(), string(mounts), in.StartCommand, in.RegistryID, appID))
 	if err != nil {
 		return App{}, err
 	}

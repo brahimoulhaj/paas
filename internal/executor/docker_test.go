@@ -60,13 +60,13 @@ func TestDockerLifecycle(t *testing.T) {
 
 	// Pull with progress.
 	var updates int
-	if err := d.PullImage(ctx, testImage, func(PullProgress) { updates++ }); err != nil {
+	if err := d.PullImage(ctx, testImage, nil, func(PullProgress) { updates++ }); err != nil {
 		t.Fatalf("PullImage: %v", err)
 	}
 	if updates == 0 {
 		t.Error("PullImage reported no progress")
 	}
-	if err := d.PullImage(ctx, "busybox:no-such-tag-"+d.network, nil); err == nil {
+	if err := d.PullImage(ctx, "busybox:no-such-tag-"+d.network, nil, nil); err == nil {
 		t.Error("PullImage of a missing tag succeeded")
 	}
 
@@ -246,7 +246,7 @@ func TestDockerPortsAndMounts(t *testing.T) {
 	if err := d.EnsureNetwork(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.PullImage(ctx, testImage, nil); err != nil {
+	if err := d.PullImage(ctx, testImage, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
@@ -326,7 +326,7 @@ func TestDockerVolumeSubPath(t *testing.T) {
 	if err := d.EnsureNetwork(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.PullImage(ctx, testImage, nil); err != nil {
+	if err := d.PullImage(ctx, testImage, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	vol := d.network + "-data"
@@ -367,7 +367,7 @@ func TestDockerVolumeSubPath(t *testing.T) {
 func TestDockerBuildImages(t *testing.T) {
 	d := newTestDocker(t)
 	ctx := context.Background()
-	if err := d.PullImage(ctx, testImage, nil); err != nil {
+	if err := d.PullImage(ctx, testImage, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	resource := "app1"
@@ -466,7 +466,7 @@ func TestDockerEntrypointOverride(t *testing.T) {
 	if err := d.EnsureNetwork(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.PullImage(ctx, testImage, nil); err != nil {
+	if err := d.PullImage(ctx, testImage, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// What an app's start command becomes: the shell expands variables and $(...).

@@ -1,0 +1,73 @@
+// Texts of the Registry page: private image registries apps pull from.
+
+export const en = {
+  title: 'Registries',
+  what: 'registries',
+  intro: 'Private image registries apps can pull from. The password or token is checked by signing in, then stored encrypted.',
+  add: 'Add registry',
+  empty: 'No registries yet.',
+  emptyHint: 'Public images pull without one.',
+  server: 'Registry',
+  serverHint: 'Host and optional port: ghcr.io, registry.gitlab.com, registry.example.com:5000. docker.io for Docker Hub.',
+  username: 'Username',
+  password: 'Password or access token',
+  passwordHint: 'A read-only token is enough: GitHub read:packages, GitLab read_registry, Docker Hub read-only access token.',
+  name: 'Name (optional)',
+  checking: 'Signing in…',
+  save: 'Add',
+  added: (ago: string) => `added ${ago}`,
+}
+
+export const fr: typeof en = {
+  title: 'Registres',
+  what: 'registres',
+  intro: 'Registres d’images privés depuis lesquels les apps peuvent télécharger. Le mot de passe ou jeton est vérifié par une connexion, puis stocké chiffré.',
+  add: 'Ajouter un registre',
+  empty: 'Aucun registre.',
+  emptyHint: 'Les images publiques se téléchargent sans registre.',
+  server: 'Registre',
+  serverHint: 'Hôte et port facultatif : ghcr.io, registry.gitlab.com, registry.example.com:5000. docker.io pour Docker Hub.',
+  username: 'Utilisateur',
+  password: 'Mot de passe ou jeton d’accès',
+  passwordHint: 'Un jeton en lecture seule suffit : GitHub read:packages, GitLab read_registry, jeton Docker Hub en lecture seule.',
+  name: 'Nom (facultatif)',
+  checking: 'Connexion…',
+  save: 'Ajouter',
+  added: (ago) => `ajouté ${ago}`,
+}
+
+export const ar: typeof en = {
+  title: 'السجلات',
+  what: 'السجلات',
+  intro: 'سجلات صور خاصة يمكن للتطبيقات السحب منها. تُتحقق كلمة المرور أو الرمز بتسجيل الدخول، ثم تُخزَّن مشفّرة.',
+  add: 'إضافة سجل',
+  empty: 'لا توجد سجلات بعد.',
+  emptyHint: 'الصور العامة تُسحب دون سجل.',
+  server: 'السجل',
+  serverHint: 'المضيف ومنفذ اختياري: ghcr.io أو registry.gitlab.com أو registry.example.com:5000. docker.io لـ Docker Hub.',
+  username: 'اسم المستخدم',
+  password: 'كلمة المرور أو رمز الوصول',
+  passwordHint: 'رمز للقراءة فقط يكفي: GitHub read:packages، GitLab read_registry، رمز Docker Hub للقراءة فقط.',
+  name: 'الاسم (اختياري)',
+  checking: 'جارٍ تسجيل الدخول…',
+  save: 'إضافة',
+  added: (ago) => `أُضيف ${ago}`,
+}
+
+export const es: typeof en = {
+  title: 'Registros',
+  what: 'registros',
+  intro: 'Registros de imágenes privados desde los que las apps pueden descargar. La contraseña o el token se comprueba iniciando sesión y se guarda cifrado.',
+  add: 'Añadir registro',
+  empty: 'Aún no hay registros.',
+  emptyHint: 'Las imágenes públicas se descargan sin registro.',
+  server: 'Registro',
+  serverHint: 'Host y puerto opcional: ghcr.io, registry.gitlab.com, registry.example.com:5000. docker.io para Docker Hub.',
+  username: 'Usuario',
+  password: 'Contraseña o token de acceso',
+  passwordHint: 'Basta con un token de solo lectura: GitHub read:packages, GitLab read_registry, token de Docker Hub de solo lectura.',
+  name: 'Nombre (opcional)',
+  checking: 'Iniciando sesión…',
+  save: 'Añadir',
+  added: (ago) => `añadido ${ago}`,
+}

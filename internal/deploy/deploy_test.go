@@ -1032,3 +1032,47 @@ func TestCancelDeployment(t *testing.T) {
 		t.Errorf("deploy after cancels: %+v", d)
 	}
 }
+
+func TestDeployFromPrivateRegistry(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	reg, err := e.st.CreateRegistry(ctx, "GHCR", store.RegistryCredentials{Server: "ghcr.io", Username: "bot", Password: "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.ex.Private = map[string]bool{"ghcr.io/org/web:1": true}
+	e.ex.Logins = map[string]string{"ghcr.io": "bot:tok"}
+	update := func(image, registryID string) {
+		t.Helper()
+		a, err := e.st.UpdateApp(ctx, e.app.ID, store.AppInput{Name: "web", Image: image, RegistryID: registryID, Port: 80})
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.app = a
+	}
+
+	// Without credentials the private image does not pull.
+	update("ghcr.io/org/web:1", "")
+	if d := e.deploy(); d.Status != store.DeployFailed || !strings.Contains(d.Error, "unauthorized") {
+		t.Fatalf("no registry: %+v", d)
+	}
+	// With the registry it does, and the log names the account, never the password.
+	update("ghcr.io/org/web:1", reg.ID)
+	d := e.deploy()
+	if d.Status != store.DeploySucceeded {
+		t.Fatalf("with registry: %+v\n%s", d, e.log(d))
+	}
+	if last := e.ex.PullAuths[len(e.ex.PullAuths)-1]; last == nil || last.Username != "bot" || last.Server != "ghcr.io" {
+		t.Errorf("pull auth = %+v", last)
+	}
+	if l := e.log(d); !strings.Contains(l, "signed in to ghcr.io as bot") || strings.Contains(l, "tok") {
+		t.Errorf("log:\n%s", l)
+	}
+	// An image on another host never receives the credentials (set behind the API's back).
+	if _, err := e.st.UpdateApp(ctx, e.app.ID, store.AppInput{Name: "web", Image: "evil.example.com/web:1", RegistryID: reg.ID, Port: 80}); err != nil {
+		t.Fatal(err)
+	}
+	pulls := len(e.ex.PullAuths)
+	if d := e.deploy(); d.Status != store.DeployFailed || !strings.Contains(d.Error, "only sent to their own registry") || len(e.ex.PullAuths) != pulls {
+		t.Errorf("other host: %+v, %d pulls", d, len(e.ex.PullAuths)-pulls)
+	}
+}

@@ -19,6 +19,7 @@ import * as settingsGit from './settingsGit'
 import * as settingsTokens from './settingsTokens'
 import * as settingsUpdates from './settingsUpdates'
 import * as settingsBuilds from './settingsBuilds'
+import * as registries from './registries'
 import * as onboarding from './onboarding'
 import * as terminal from './terminal'
 import * as metrics from './metrics'
@@ -48,6 +49,7 @@ const pick = (l: Code) => ({
   settingsTokens: settingsTokens[l] as typeof settingsTokens.en,
   settingsUpdates: settingsUpdates[l] as typeof settingsUpdates.en,
   settingsBuilds: settingsBuilds[l] as typeof settingsBuilds.en,
+  registries: registries[l] as typeof registries.en,
   onboarding: onboarding[l] as typeof onboarding.en,
 })
 

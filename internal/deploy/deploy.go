@@ -388,7 +388,12 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 		}
 	} else {
 		logw.printf("Deploying %s (image %s)", app.Name, app.Image)
-		if err := s.retry(ctx, logw, "Pull", func() error { return s.pull(ctx, image, logw) }); err != nil {
+		auth, err := s.registryAuth(ctx, app, image)
+		if err != nil {
+			fail("", err)
+			return
+		}
+		if err := s.retry(ctx, logw, "Pull", func() error { return s.pull(ctx, image, auth, logw) }); err != nil {
 			fail("", err)
 			return
 		}
@@ -546,11 +551,34 @@ func (s *Service) removeOthers(ctx context.Context, app store.App, keep string, 
 	}
 }
 
+// registryAuth returns the credentials an image app pulls with: none for a public image.
+// They are only ever sent to the registry they belong to: an image on another host fails.
+func (s *Service) registryAuth(ctx context.Context, app store.App, image string) (*executor.RegistryAuth, error) {
+	if app.RegistryID == "" {
+		return nil, nil
+	}
+	c, err := s.opts.Store.RegistryCredentials(ctx, app.RegistryID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, errors.New("the app's registry was removed; choose another in its settings")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("registry credentials: %w", err)
+	}
+	if host := store.ImageServer(image); host != c.Server {
+		return nil, fmt.Errorf("the image is on %s, but the app's registry is %s; credentials are only sent to their own registry", host, c.Server)
+	}
+	return &executor.RegistryAuth{Server: c.Server, Username: c.Username, Password: c.Password}, nil
+}
+
 // pull pulls an image, logging one line per layer per status change.
-func (s *Service) pull(ctx context.Context, image string, logw *logWriter) error {
-	logw.printf("Pulling image %s", image)
+func (s *Service) pull(ctx context.Context, image string, auth *executor.RegistryAuth, logw *logWriter) error {
+	if auth != nil {
+		logw.printf("Pulling image %s (signed in to %s as %s)", image, auth.Server, auth.Username)
+	} else {
+		logw.printf("Pulling image %s", image)
+	}
 	last := map[string]string{}
-	return s.opts.Executor.PullImage(ctx, image, func(p executor.PullProgress) {
+	return s.opts.Executor.PullImage(ctx, image, auth, func(p executor.PullProgress) {
 		// One line per layer per status change, not one per progress tick.
 		if p.Status == "" || last[p.Layer] == p.Status {
 			return

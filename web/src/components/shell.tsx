@@ -10,13 +10,14 @@ import { Badge, cx } from './ui'
 
 // Sections light up as their milestone lands; until then they show as "soon".
 type NavKey = 'overview' | 'projects' | 'activity' | 'databases' | 'storage' | 'registry' | 'settings'
-const nav: { key: NavKey; to?: '/' | '/projects' | '/activity' | '/settings'; exact?: boolean }[] = [
+// Registry lists the private registries apps pull from; the built-in registry (M5) joins it later.
+const nav: { key: NavKey; to?: '/' | '/projects' | '/activity' | '/registry' | '/settings'; exact?: boolean }[] = [
   { key: 'overview', to: '/', exact: true },
   { key: 'projects', to: '/projects' },
   { key: 'activity', to: '/activity' },
   { key: 'databases' },
   { key: 'storage' },
-  { key: 'registry' },
+  { key: 'registry', to: '/registry' },
   { key: 'settings', to: '/settings' },
 ]
 

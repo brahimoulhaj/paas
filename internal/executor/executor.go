@@ -25,14 +25,27 @@ const (
 	KindService  Kind = "service" // built-in services: storage, registry, updater
 )
 
+// RegistryAuth is a login to a private image registry. Server is a registry host
+// ("ghcr.io", "registry.example.com:5000"); "docker.io" or empty is Docker Hub.
+type RegistryAuth struct {
+	Server   string
+	Username string
+	Password string
+}
+
+// ErrUnauthorized means a registry refused the credentials.
+var ErrUnauthorized = errors.New("the registry refused the username or password")
+
 // Executor is everything the panel needs from a container host.
 type Executor interface {
 	// Ping checks that the container host answers.
 	Ping(ctx context.Context) error
 	// EnsureNetwork creates the shared network when it does not exist yet.
 	EnsureNetwork(ctx context.Context) error
-	// PullImage pulls ref; onProgress may be nil.
-	PullImage(ctx context.Context, ref string, onProgress func(PullProgress)) error
+	// PullImage pulls ref, with credentials when auth is not nil; onProgress may be nil.
+	PullImage(ctx context.Context, ref string, auth *RegistryAuth, onProgress func(PullProgress)) error
+	// RegistryLogin checks credentials against a registry; ErrUnauthorized when refused.
+	RegistryLogin(ctx context.Context, auth RegistryAuth) error
 	// CreateContainer creates (but does not start) a container and returns its id.
 	CreateContainer(ctx context.Context, spec ContainerSpec) (string, error)
 	StartContainer(ctx context.Context, id string) error

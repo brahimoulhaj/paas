@@ -330,7 +330,7 @@ func (m *Manager) ensureContainer(ctx context.Context) error {
 	id, err := ex.CreateContainer(ctx, spec)
 	if errors.Is(err, executor.ErrNotFound) { // image not present yet
 		m.opts.Log.Info("pulling proxy image", "image", spec.Image)
-		if err := ex.PullImage(ctx, spec.Image, nil); err != nil {
+		if err := ex.PullImage(ctx, spec.Image, nil, nil); err != nil {
 			return err
 		}
 		id, err = ex.CreateContainer(ctx, spec)

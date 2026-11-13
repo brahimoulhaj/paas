@@ -2,6 +2,8 @@ package executor
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -15,6 +17,7 @@ import (
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
 
 	"panel/internal/brand"
@@ -103,8 +106,48 @@ func (d *Docker) RemoveNetwork(ctx context.Context) error {
 	return nil
 }
 
-func (d *Docker) PullImage(ctx context.Context, ref string, onProgress func(PullProgress)) error {
-	resp, err := d.cli.ImagePull(ctx, ref, client.ImagePullOptions{})
+// dockerHubAddress is how the Docker daemon names Docker Hub in a login.
+const dockerHubAddress = "https://index.docker.io/v1/"
+
+func serverAddress(server string) string {
+	if server == "" || server == "docker.io" {
+		return dockerHubAddress
+	}
+	return server
+}
+
+// encodeAuth is the X-Registry-Auth header value: base64url of the JSON credentials.
+func encodeAuth(a RegistryAuth) (string, error) {
+	raw, err := json.Marshal(registry.AuthConfig{Username: a.Username, Password: a.Password, ServerAddress: serverAddress(a.Server)})
+	if err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(raw), nil
+}
+
+func (d *Docker) RegistryLogin(ctx context.Context, a RegistryAuth) error {
+	_, err := d.cli.RegistryLogin(ctx, client.RegistryLoginOptions{
+		Username: a.Username, Password: a.Password, ServerAddress: serverAddress(a.Server),
+	})
+	switch {
+	case err == nil:
+		return nil
+	case cerrdefs.IsUnauthorized(err) || cerrdefs.IsPermissionDenied(err) || strings.Contains(strings.ToLower(err.Error()), "unauthorized"):
+		return ErrUnauthorized
+	}
+	return fmt.Errorf("log in to %s: %w", a.Server, err)
+}
+
+func (d *Docker) PullImage(ctx context.Context, ref string, auth *RegistryAuth, onProgress func(PullProgress)) error {
+	opts := client.ImagePullOptions{}
+	if auth != nil {
+		header, err := encodeAuth(*auth)
+		if err != nil {
+			return err
+		}
+		opts.RegistryAuth = header
+	}
+	resp, err := d.cli.ImagePull(ctx, ref, opts)
 	if err != nil {
 		return fmt.Errorf("pull %s: %w", ref, wrapNotFound(err))
 	}

@@ -3,6 +3,7 @@ import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect
 import { Shell } from './components/shell'
 import { meQuery, metaQuery, onboardingQuery } from './lib/api'
 import { ActivityPage } from './routes/activity'
+import { RegistryPage } from './routes/registries'
 import { AppPage, appTabs, type AppTab } from './routes/app'
 import { LoginPage } from './routes/login'
 import { OnboardingPage } from './routes/onboarding'
@@ -93,6 +94,7 @@ const appPageRoute = createRoute({
   component: AppPage,
 })
 const activityRoute = createRoute({ getParentRoute: () => appRoute, path: '/activity', component: ActivityPage })
+const registryRoute = createRoute({ getParentRoute: () => appRoute, path: '/registry', component: RegistryPage })
 const settingsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/settings',
@@ -107,7 +109,7 @@ const routeTree = rootRoute.addChildren([
   setupRoute,
   loginRoute,
   onboardingRoute,
-  appRoute.addChildren([overviewRoute, projectsRoute, projectRoute, appPageRoute, activityRoute, settingsRoute]),
+  appRoute.addChildren([overviewRoute, projectsRoute, projectRoute, appPageRoute, activityRoute, registryRoute, settingsRoute]),
 ])
 
 export function makeRouter(queryClient: QueryClient) {

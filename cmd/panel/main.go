@@ -252,6 +252,7 @@ func serve(ctx context.Context, cfg config.Config) error {
 
 	apiSrv := api.New(st, acc, log, version, webui.FS())
 	apiSrv.SetBuildDefaults(buildDefaults)
+	apiSrv.SetRegistryChecker(ex)
 	metrics := hostmetrics.New(hostmetrics.Options{DataDir: cfg.DataDir, ProcRoot: os.Getenv(brand.EnvPrefix() + "HOST_PROC")})
 	go metrics.Run(ctx)
 	apiSrv.SetHostMetrics(metrics)

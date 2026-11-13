@@ -70,6 +70,7 @@ type appJSON struct {
 	Name                string            `json:"name"`
 	SourceType          string            `json:"source_type"`
 	Image               string            `json:"image"`
+	RegistryID          string            `json:"registry_id"`
 	Port                int               `json:"port"`
 	CPULimit            float64           `json:"cpu_limit"`
 	MemoryLimitMB       int64             `json:"memory_limit_mb"`
@@ -91,7 +92,7 @@ func toAppJSON(a store.App) appJSON {
 	return appJSON{
 		Mounts:      a.Mounts,
 		Environment: a.Environment,
-		ID:          a.ID, ProjectID: a.ProjectID, Name: a.Name, SourceType: a.SourceType, Image: a.Image, Port: a.Port,
+		ID:          a.ID, ProjectID: a.ProjectID, Name: a.Name, SourceType: a.SourceType, Image: a.Image, RegistryID: a.RegistryID, Port: a.Port,
 		CPULimit: a.CPULimit, MemoryLimitMB: a.MemoryMB, DesiredState: a.DesiredState,
 		CurrentDeploymentID: a.CurrentDeploymentID,
 		GitSourceID:         a.Git.ConnectionID,
@@ -317,6 +318,7 @@ type appFields struct {
 	Name           *string            `json:"name"`
 	SourceType     *string            `json:"source_type"`
 	Image          *string            `json:"image"`
+	RegistryID     *string            `json:"registry_id"`
 	GitSourceID    *string            `json:"git_source_id"`
 	GitRepository  *string            `json:"git_repository"`
 	GitBranch      *string            `json:"git_branch"`
@@ -345,6 +347,7 @@ func (f appFields) apply(in store.AppInput) store.AppInput {
 	str(&in.Name, f.Name)
 	str(&in.SourceType, f.SourceType)
 	str(&in.Image, f.Image)
+	str(&in.RegistryID, f.RegistryID)
 	str(&in.Git.ConnectionID, f.GitSourceID)
 	str(&in.Git.Repository, f.GitRepository)
 	str(&in.Git.Branch, f.GitBranch)
@@ -484,7 +487,7 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input := in.apply(store.AppInput{})
-	if !validApp(w, input) || !s.validGitSource(w, r, input) {
+	if !validApp(w, input) || !s.validGitSource(w, r, input) || !s.validRegistry(w, r, input) {
 		return
 	}
 	a, err := s.store.CreateApp(r.Context(), r.PathValue("id"), input)
@@ -523,10 +526,10 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	input := in.apply(store.AppInput{
-		Mounts: a.Mounts, Environment: a.Environment, Name: a.Name, SourceType: a.SourceType, Image: a.Image, Git: a.Git,
+		Mounts: a.Mounts, Environment: a.Environment, Name: a.Name, SourceType: a.SourceType, Image: a.Image, RegistryID: a.RegistryID, Git: a.Git,
 		StartCommand: a.StartCommand, Port: a.Port, CPULimit: a.CPULimit, MemoryMB: a.MemoryMB,
 	})
-	if !validApp(w, input) || !s.validGitSource(w, r, input) {
+	if !validApp(w, input) || !s.validGitSource(w, r, input) || !s.validRegistry(w, r, input) {
 		return
 	}
 	a, err = s.store.UpdateApp(r.Context(), a.ID, input)

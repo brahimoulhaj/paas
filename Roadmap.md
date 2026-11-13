@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build (Railpack and GitLab work on the VPS, 2026-11-13; a single-module Gradle app needs a start command); try build caps (Settings → Builds), a panel update during a deploy (it should resume) and a deploy key on a GitHub repository. Then private registries. Time a fresh install.
+**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build (Railpack and GitLab work on the VPS, 2026-11-13; a single-module Gradle app needs a start command); try build caps (Settings → Builds), a panel update during a deploy (it should resume) a deploy key on a GitHub repository, and a private image from GHCR or Docker Hub. Then push builds to a registry, or M3 (webhooks, health checks, rollback). Time a fresh install.
 
 ---
 
@@ -189,15 +189,15 @@ Goal: push-to-deploy from a repository with any of the builders.
 ### Env vars and registries
 - [~] Env vars CRUD, encrypted at rest, build-time flag — per-app variables passed to the container on deploy (`0005_app_environment.sql`, `internal/store/environment_test.go`, `internal/deploy/deploy_test.go`); encrypted at rest with the panel key (AES-GCM, `internal/store/environment.go`); environments stored in clear by earlier versions are encrypted at startup (`TestEnvironmentEncryptedAtRest`); no build-time flag yet (no build arguments exist)
 - [x] Bulk edit / `.env` paste — `web/src/lib/environment.ts` parses and writes `.env` text (comments, `export`, quoted values)
-- [ ] External private registries: add, test credentials, pull with auth
-- [ ] App source: image from a private registry
+- [x] External private registries: add, test credentials, pull with auth — the Registry page in the sidebar (`/registry`; `GET/POST/DELETE /api/registries`); adding signs in through the Docker daemon (`RegistryLogin`), a refused password is reported; the password is encrypted with the panel key and never returned; Docker Hub names are normalized to `docker.io`. A registry in use cannot be removed. `0010_registries.sql`, `TestRegistries`, `TestRegistriesAPI`, `TestPrivateRegistry` (real `registry:2` with password auth: wrong password refused, pull without credentials refused, with them works); checked in a browser against a local registry: refused password, then add, deploy and remove (2026-11-13)
+- [x] App source: image from a private registry — image apps choose Registry access (public or a registry); credentials are only sent when the image is on that registry's host, checked on save and again at deploy (`TestDeployFromPrivateRegistry`); the deploy log names the account, never the password
 
 ### UI
 - [~] Git sources settings — Settings → Git connections: connect GitHub, connect GitLab, remove (refused while an app uses it); GitHub and GitLab connected for real (2026-11-13)
 - [x] Create-app flow (Git) with builder choice — Automatic, Dockerfile or Railpack; the Dockerfile field hides for Railpack; the app overview shows the builder
 - [ ] Build log stream on the deployment page
 - [x] Env vars editor — `web/src/components/environment.tsx`, with a configurable log line limit in the log viewer
-- [ ] Registries settings
+- [x] Registries page — its own page (sidebar → Registry), not in Settings: add (server, user, password or read-only token), list, remove
 
 ---
 

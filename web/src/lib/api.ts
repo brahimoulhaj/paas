@@ -123,6 +123,8 @@ export type App = {
   project_id: string
   name: string
   source_type: 'image' | 'git'
+  /** Image apps: the private registry pulled from with credentials; '' = public. */
+  registry_id: string
   /** Image apps only; empty for a Git app. */
   image: string
   /** Git connection used to fetch a private repository; empty = public. */
@@ -201,7 +203,7 @@ export type PanelEvent = {
 }
 
 export type SourceInput =
-  | { source_type: 'image'; image: string }
+  | { source_type: 'image'; image: string; registry_id: string }
   | {
       source_type: 'git'
       git_source_id: string
@@ -284,6 +286,11 @@ export type GitRepo = { full_name: string; clone_url: string; default_branch: st
 
 /** What the browser posts to GitHub to create the app. */
 export type GitHubManifest = { action_url: string; manifest: string; state: string }
+
+/** A private image registry; the password never comes back from the API. */
+export type Registry = { id: string; name: string; server: string; username: string; created_at: string }
+
+export const registriesQuery = { queryKey: ['registries'] as const, queryFn: () => api<Registry[]>('/registries') }
 
 export const gitSourcesQuery = { queryKey: ['git-sources'] as const, queryFn: () => api<GitSource[]>('/git-sources') }
 

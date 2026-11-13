@@ -23,6 +23,10 @@ type Fake struct {
 	RestartLoop map[string]bool
 	// PullDelay makes every pull take this long (to test concurrency).
 	PullDelay time.Duration
+	// Private images need a login from Logins to pull; PullAuths records each pull's.
+	Private   map[string]bool
+	Logins    map[string]string
+	PullAuths []*executor.RegistryAuth
 
 	mu         sync.Mutex
 	containers map[string]*executor.Container // by id
@@ -43,7 +47,24 @@ func (f *Fake) EnsureNetwork(context.Context) error { return nil }
 func (f *Fake) Close() error                        { return nil }
 
 // PullImage fails for any ref containing "missing".
-func (f *Fake) PullImage(ctx context.Context, ref string, onProgress func(executor.PullProgress)) error {
+// RegistryLogin accepts the credentials in Logins (server → "user:password").
+func (f *Fake) RegistryLogin(_ context.Context, a executor.RegistryAuth) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Logins[a.Server] != a.Username+":"+a.Password {
+		return executor.ErrUnauthorized
+	}
+	return nil
+}
+
+func (f *Fake) PullImage(ctx context.Context, ref string, auth *executor.RegistryAuth, onProgress func(executor.PullProgress)) error {
+	f.mu.Lock()
+	f.PullAuths = append(f.PullAuths, auth)
+	private := f.Private[ref]
+	f.mu.Unlock()
+	if private && (auth == nil || f.RegistryLogin(ctx, *auth) != nil) {
+		return fmt.Errorf("pull %s: unauthorized: authentication required", ref)
+	}
 	if f.PullDelay > 0 {
 		select {
 		case <-ctx.Done():

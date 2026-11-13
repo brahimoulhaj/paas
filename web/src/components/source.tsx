@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { gitBranchesQuery, gitReposQuery, gitSourcesQuery, type App, type GitSource, type SourceInput } from '../lib/api'
+import { gitBranchesQuery, gitReposQuery, gitSourcesQuery, registriesQuery, type App, type GitSource, type SourceInput } from '../lib/api'
 import { repoName } from '../lib/format'
 import { rich, useT } from '../lib/i18n'
 import { ComboField, type ComboOption } from './combobox'
@@ -10,6 +10,8 @@ import { cx, Field } from './ui'
 export type SourceForm = {
   source_type: 'image' | 'git'
   image: string
+  /** Private registry for the image; empty = a public image. */
+  registry_id: string
   /** Git connection; empty = a public repository by URL. */
   git_source_id: string
   git_repository: string
@@ -23,6 +25,7 @@ export function sourceForm(app?: App): SourceForm {
   return {
     source_type: app?.source_type ?? 'image',
     image: app?.image ?? '',
+    registry_id: app?.registry_id ?? '',
     git_source_id: app?.git_source_id ?? '',
     git_repository: app?.git_repository ?? '',
     git_branch: app?.git_branch || 'main',
@@ -34,7 +37,7 @@ export function sourceForm(app?: App): SourceForm {
 
 /** The request fields for the chosen source; the other source's fields are left out. */
 export function sourceInput(f: SourceForm): SourceInput {
-  if (f.source_type === 'image') return { source_type: 'image', image: f.image.trim() }
+  if (f.source_type === 'image') return { source_type: 'image', image: f.image.trim(), registry_id: f.registry_id }
   return {
     source_type: 'git',
     git_source_id: f.git_source_id,
@@ -56,7 +59,6 @@ const sourceLabel = (s: GitSource) => `${sourceKind[s.type]} · ${s.name}`
 
 /** Image or Git repository, and the fields of the chosen one. */
 export function SourceFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceForm) => void }) {
-  const set = (key: keyof SourceForm) => (e: { target: { value: string } }) => onChange({ ...form, [key]: e.target.value })
   const t = useT()
   const choices: { value: SourceForm['source_type']; label: string }[] = [
     { value: 'image', label: t.source.image },
@@ -82,20 +84,56 @@ export function SourceFields({ form, onChange }: { form: SourceForm; onChange: (
         ))}
       </div>
       {form.source_type === 'image' ? (
-        <Field
-          label={t.source.image}
-          name="image"
-          required
-          dir="ltr"
-          placeholder="nginx:1.27"
-          hintTooltip hint={t.source.imageHint}
-          value={form.image}
-          onChange={set('image')}
-        />
+        <ImageFields form={form} onChange={onChange} />
       ) : (
         <GitFields form={form} onChange={onChange} />
       )}
     </div>
+  )
+}
+
+/** The image, and the registry it is pulled from when it is private. */
+function ImageFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceForm) => void }) {
+  const t = useT()
+  const registries = useQuery(registriesQuery)
+  const chosen = registries.data?.find((r) => r.id === form.registry_id)
+  const options: ComboOption[] = [
+    { value: '', label: t.source.publicImage },
+    ...(registries.data ?? []).map((r) => ({ value: r.id, label: `${r.name} · ${r.username}@${r.server}` })),
+  ]
+  if (form.registry_id && !options.some((o) => o.value === form.registry_id)) {
+    options.push({ value: form.registry_id, label: t.source.registryAccess })
+  }
+  // Docker Hub images carry no host; others start with it.
+  const placeholder = chosen && chosen.server !== 'docker.io' ? `${chosen.server}/org/app:1.0` : 'nginx:1.27'
+  return (
+    <>
+      <ComboField
+        label={t.source.registryAccess}
+        name="registry_id"
+        options={options}
+        value={form.registry_id}
+        onChange={(id) => onChange({ ...form, registry_id: id })}
+        hint={rich(t.source.registryHint, {
+          a: (c) => (
+            <Link to="/registry" className="text-accent hover:underline">
+              {c}
+            </Link>
+          ),
+        })}
+      />
+      <Field
+        label={t.source.image}
+        name="image"
+        required
+        dir="ltr"
+        placeholder={placeholder}
+        hintTooltip
+        hint={chosen && chosen.server !== 'docker.io' ? t.source.imageOnRegistry(chosen.server) : t.source.imageHint}
+        value={form.image}
+        onChange={(e) => onChange({ ...form, image: e.target.value })}
+      />
+    </>
   )
 }
 
