@@ -7,9 +7,9 @@ name; it lives only in `internal/brand/brand.go`.
 **How to use:** tick a box only when the item is built *and* verified (test or manual run).
 `[ ]` not started · `[~]` in progress · `[x]` done.
 
-**Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ☐ · M4 ☐ · M5 ☐ · M6 ☐
+**Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — connect GitHub (create the app, install it) and GitLab for real, then deploy a private and a public Git app end to end in dev and on the VPS; then prune old build images. Time a fresh install.
+**Next up:** M2 — prune old build images (keep the last 5), encrypt env vars at rest, then auto-detect with Railpack and the build job queue. Try GitLab against the real service. Time a fresh install.
 
 ---
 
@@ -109,6 +109,7 @@ Verified by unit tests (fake container host) and one manual end-to-end run again
 - [x] Projects CRUD — `/api/projects`
 - [x] Apps CRUD — source type `image`, public registry, port, CPU and memory limits — `/api/projects/{id}/apps`, `/api/apps/{id}`
 - [x] Domains: add, remove, hostname validation, DNS check hint — `/api/apps/{id}/domains`, `/api/domains/{id}/dns`
+- [x] Primary domain per app (`0007_primary_domain.sql`): the first domain added is primary, can be switched (`PATCH /api/domains/{id}`), and is handed to the oldest remaining domain when the primary is removed; one primary per app enforced by a unique index
 - [x] Minimal deploy: pull → start → switch route → remove old (no health checks yet; a container that exits or restarts within 3 s fails the deploy) — `internal/deploy`
 - [x] Deployment record with status and log file path — `/api/deployments/{id}`, `/api/deployments/{id}/log`
 - [x] Start / stop / restart an app
@@ -156,19 +157,19 @@ Checked in a browser against a real deploy (create project and app, add domain, 
 Goal: push-to-deploy from a repository with any of the builders.
 
 ### Git sources
-- [~] Migration: `git_sources`, `registries`, `env_vars` — `0003_git_source.sql` adds the Git columns to `apps` and `commit_sha` to `deployments`; `0004_git_sources.sql` adds `git_sources` (secrets encrypted) and `apps.git_source_id`; `registries` and `env_vars` come with their features
-- [~] Public Git URL — app `source_type = git` with an https repository and a branch (`/api/projects/{id}/apps`, `PATCH /api/apps/{id}`; URL, branch and path validation tested in `internal/api/apps_test.go`); create-app flow and settings offer Image or Git repository; not yet deployed end to end
+- [~] Migration: `git_sources`, `registries`, `env_vars` — `0003_git_source.sql` adds the Git columns to `apps` and `commit_sha` to `deployments`; `0004_git_sources.sql` adds `git_sources` (secrets encrypted) and `apps.git_source_id`; `0005_app_environment.sql` keeps env vars as a JSON column on `apps`; `registries` comes with its feature
+- [x] Public Git URL — app `source_type = git` with an https repository and a branch (`/api/projects/{id}/apps`, `PATCH /api/apps/{id}`; URL, branch and path validation tested in `internal/api/apps_test.go`); create-app flow and settings offer Image or Git repository; deployed end to end on a real VPS (2026-11-13)
 - [ ] Private repo by deploy key (generate key pair, show public key)
-- [~] GitHub App (first provider) — created from Settings with GitHub's manifest flow (`POST /api/git-sources/github`, callback `/api/git-sources/github/callback`), read-only on code and metadata; app JWT and cached installation tokens; `internal/gitsource` tested against a fake GitHub; not yet tried against GitHub itself. Webhooks come with M3
+- [x] GitHub App (first provider) — created from Settings with GitHub's manifest flow (`POST /api/git-sources/github`, callback `/api/git-sources/github/callback`), read-only on code and metadata; app JWT and cached installation tokens; `internal/gitsource` tested against a fake GitHub; created, installed and used to deploy a private repository on a real VPS (2026-11-13). Webhooks come with M3
 - [~] GitLab token — gitlab.com or self-hosted over https, token checked when added (`POST /api/git-sources/gitlab`); tested against a fake GitLab; not yet tried against GitLab itself
 - [ ] Gitea token
-- [~] Repo and branch picker in the UI — `GET /api/git-sources/{id}/repos` and `/branches`; the app form lists the connection's repositories and the chosen one's branches; typechecked, not yet seen with a real connection
-- [~] Clone / fetch at a commit into a build workspace, with cleanup — shallow clone of the branch tip into `<data dir>/builds/<deployment>` (no credential prompt or host credential helper, https only), removed after the build and at startup; commit recorded on the deployment; a private repository is fetched with the connection's token, passed to git through the environment and scoped to the repository's host
+- [x] Repo and branch picker in the UI — `GET /api/git-sources/{id}/repos` and `/branches`; the app form lists the connection's repositories and the chosen one's branches; used with a real GitHub connection (2026-11-13)
+- [x] Clone / fetch at a commit into a build workspace, with cleanup — shallow clone of the branch tip into `<data dir>/builds/<deployment>` (no credential prompt or host credential helper, https only), removed after the build and at startup; commit recorded on the deployment; a private repository is fetched with the connection's token, passed to git through the environment and scoped to the repository's host
 
 ### Builders (`internal/builder`)
 - [x] Builder interface: source dir in, tagged local image out — `internal/builder` (`Fetch`, `Build`); the deploy pipeline builds instead of pulling for Git apps (`internal/deploy`, fake builder tests)
 - [ ] Auto-detect: Dockerfile if present, otherwise Railpack
-- [~] Dockerfile — `docker buildx build --load` with build context and Dockerfile path checked to stay inside the repository (symlinks followed); image labelled `<slug>.build=<app id>`; checked against a real daemon in `internal/builder/builder_test.go`
+- [x] Dockerfile — `docker buildx build --load` with build context and Dockerfile path checked to stay inside the repository (symlinks followed); image labelled `<slug>.build=<app id>`; checked against a real daemon in `internal/builder/builder_test.go` and on a real VPS (2026-11-13)
 - [ ] Railpack — `railpack` CLI on BuildKit (default)
 - [ ] Nixpacks — `nixpacks build`
 - [ ] Cloud Native Buildpacks — `pack build --builder <image>` (Heroku / Paketo)
@@ -185,16 +186,16 @@ Goal: push-to-deploy from a repository with any of the builders.
 - [ ] Cron scheduler (`robfig/cron`)
 
 ### Env vars and registries
-- [ ] Env vars CRUD, encrypted at rest, build-time flag
-- [ ] Bulk edit / `.env` paste
+- [~] Env vars CRUD, encrypted at rest, build-time flag — per-app variables passed to the container on deploy (`0005_app_environment.sql`, `internal/store/environment_test.go`, `internal/deploy/deploy_test.go`); stored as plain JSON, not encrypted yet; no build-time flag
+- [x] Bulk edit / `.env` paste — `web/src/lib/environment.ts` parses and writes `.env` text (comments, `export`, quoted values)
 - [ ] External private registries: add, test credentials, pull with auth
 - [ ] App source: image from a private registry
 
 ### UI
-- [~] Git sources settings — Settings → Git connections: connect GitHub, connect GitLab, remove (refused while an app uses it); seen in a browser without a connection
+- [~] Git sources settings — Settings → Git connections: connect GitHub, connect GitLab, remove (refused while an app uses it); GitHub connected for real (2026-11-13), GitLab not yet
 - [ ] Create-app flow (Git) with builder choice
 - [ ] Build log stream on the deployment page
-- [ ] Env vars editor
+- [x] Env vars editor — `web/src/components/environment.tsx`, with a configurable log line limit in the log viewer
 - [ ] Registries settings
 
 ---
@@ -221,7 +222,7 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 - [ ] Rolling failure path: remove new, leave route untouched, mark failed
 - [ ] Recreate: stop old → start new → health check → roll back to previous image on failure
 - [ ] Recreate forced for apps with volumes or published host ports; UI states the short gap
-- [ ] Volumes CRUD and mounts
+- [x] Volumes CRUD and mounts — named volumes, bind mounts and inline files per app (`0006_app_mounts.sql`, `internal/deploy/mounts.go`); file content written per deployment so editing never changes the live container; tested in `internal/deploy/mounts_test.go` and `internal/store/mounts_test.go`
 
 ### Rollback and triggers
 - [ ] Rollback to a kept image through the same pipeline, without a build
@@ -242,7 +243,7 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 - [ ] Rollback picker
 - [ ] Webhook and auto-deploy settings
 - [ ] Certificates page
-- [ ] Container terminal (WebSocket + xterm.js)
+- [x] Container terminal (WebSocket + xterm.js) — `internal/api/terminal.go`, `internal/executor/terminal.go`, `web/src/components/container-terminal.tsx`; tested in `internal/api/terminal_test.go` and on a real VPS (2026-11-13)
 
 ---
 
@@ -316,9 +317,9 @@ Goal: see what the server is doing and get told when something breaks.
 
 ### Metrics (`internal/metrics`)
 - [ ] Migration: `metrics_samples`, `notification_channels`, `alert_rules`
-- [ ] Docker stats sampler, 10 s samples (CPU, memory, network, disk)
+- [ ] Docker stats sampler, 10 s samples (CPU, memory, network, disk) — per container; engine-wide counts and storage usage already shown by `internal/dockermetrics` (`/api/docker/metrics`, 15 s refresh, disk scan at most once a minute)
 - [ ] Rollups to 1 min and 1 h; prune after 30 days
-- [ ] Host metrics: CPU, memory, disk, load
+- [x] Host metrics: CPU, memory, disk, load — plus swap, uptime and network; `internal/hostmetrics`, 5 s samples, ten minutes kept in memory, `/api/host/metrics`; reads `/proc` through a read-only `/host/proc` mount on Linux (installer and dev Compose); on a real VPS (2026-11-13)
 - [ ] Metrics query API
 
 ### Notifications (`internal/notify`)
@@ -336,7 +337,7 @@ Goal: see what the server is doing and get told when something breaks.
 - [ ] ClickHouse driver
 
 ### UI
-- [ ] Global dashboard
+- [~] Global dashboard — host and Docker cards on the overview page (`web/src/components/host-metrics.tsx`, `docker-metrics.tsx`); no per-app charts or history beyond ten minutes
 - [ ] Per-app and per-database charts (Recharts)
 - [ ] Notification channels settings
 - [ ] Alert rules editor
