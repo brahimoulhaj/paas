@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — deploy a Railpack app (no Dockerfile) on the VPS; then the build job queue (one build at a time, cancel). Try GitLab against the real service. Time a fresh install.
+**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build; then CPU and memory caps on builds, and retries / resume after restart for the queue. Try GitLab against the real service. Time a fresh install.
 
 ---
 
@@ -180,9 +180,9 @@ Goal: push-to-deploy from a repository with any of the builders.
 
 ### Jobs and queue (`internal/jobs`)
 - [ ] SQLite-backed job queue with retries and resume after restart
-- [ ] One build at a time by default, configurable
+- [x] One build at a time by default, configurable — `BERTH_MAX_BUILDS`; a Git deploy waits, still `queued`, for a build slot and says so in its log; the slot is released once the image exists (pulls take none). In memory: a restart fails queued deploys like running ones (`TestBuildsRunOneAtATime`, `TestMaxBuildsRunsInParallel`)
 - [ ] CPU and memory caps on builds
-- [ ] Cancel a queued or running build
+- [x] Cancel a queued or running build — `POST /api/deployments/{id}/cancel` and a Cancel button on the deployment log; works until traffic switches (then 409 `not_cancellable`); the build or pull is killed, a new container removed, the live version keeps serving; status `cancelled`, event `deployment.cancelled` (`TestCancelDeployment`). Not yet clicked in a browser
 - [ ] Cron scheduler (`robfig/cron`)
 
 ### Env vars and registries

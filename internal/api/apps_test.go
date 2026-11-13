@@ -178,6 +178,11 @@ func TestAppsAPI(t *testing.T) {
 	if dep["status"] != "succeeded" || dep["container_name"] == "" || dep["finished_at"] == nil || dep["port"] != float64(3000) {
 		t.Fatalf("finished deployment = %v", dep)
 	}
+	// A finished deployment cannot be cancelled; an unknown one is not found.
+	if code, m := e.call("POST", "/api/deployments/"+depID+"/cancel", nil); code != 409 || m["error"].(map[string]any)["code"] != "not_cancellable" {
+		t.Errorf("cancel finished = %d %v", code, m)
+	}
+	e.must(404, "POST", "/api/deployments/missing/cancel", nil)
 	if got := e.list("/api/apps/" + id + "/deployments"); len(got) != 1 || got[0]["id"] != depID {
 		t.Fatalf("deployments = %v", got)
 	}

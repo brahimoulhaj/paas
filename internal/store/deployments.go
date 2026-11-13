@@ -14,7 +14,13 @@ const (
 	DeployRunning   = "running"
 	DeploySucceeded = "succeeded"
 	DeployFailed    = "failed"
+	DeployCancelled = "cancelled"
 )
+
+// Finished reports whether the deployment has ended, whatever the outcome.
+func (d Deployment) Finished() bool {
+	return d.Status == DeploySucceeded || d.Status == DeployFailed || d.Status == DeployCancelled
+}
 
 type Deployment struct {
 	ID            string

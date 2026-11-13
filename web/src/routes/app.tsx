@@ -323,6 +323,7 @@ const deployTone: Record<Deployment['status'], Tone> = {
   running: 'warn',
   succeeded: 'accent',
   failed: 'danger',
+  cancelled: 'muted',
 }
 
 function Deployments(props: {
@@ -378,12 +379,37 @@ function Deployments(props: {
 
 function DeploymentLog({ deployment }: { deployment: Deployment }) {
   const t = useT()
+  const queryClient = useQueryClient()
+  const cancel = useMutation({
+    mutationFn: () => api<Deployment>(`/deployments/${deployment.id}/cancel`, { method: 'POST' }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: deploymentsQuery(deployment.app_id).queryKey }),
+  })
   return (
     <Panel
       title={t.app.logTitle(dateTime(deployment.created_at))}
-      actions={<Badge tone={deployTone[deployment.status]}>{t.app.deployStatus[deployment.status]}</Badge>}
+      actions={
+        <div className="flex items-center gap-2">
+          {isActive(deployment) && (
+            <Button
+              variant="ghost"
+              type="button"
+              title={t.app.cancelDeploymentHint}
+              disabled={cancel.isPending}
+              onClick={() => cancel.mutate()}
+            >
+              {t.app.cancelDeployment}
+            </Button>
+          )}
+          <Badge tone={deployTone[deployment.status]}>{t.app.deployStatus[deployment.status]}</Badge>
+        </div>
+      }
     >
-      {deployment.error && <p className="border-b border-line px-4 py-2 text-xs text-danger">{deployment.error}</p>}
+      {cancel.error && <p className="border-b border-line px-4 py-2 text-xs text-danger">{cancel.error.message}</p>}
+      {deployment.error && (
+        <p className={cx('border-b border-line px-4 py-2 text-xs', deployment.status === 'cancelled' ? 'text-muted' : 'text-danger')}>
+          {deployment.error}
+        </p>
+      )}
       {/* The key reopens the stream when another deployment is selected. */}
       <LogViewer key={deployment.id} url={`/api/deployments/${deployment.id}/log/stream`} />
     </Panel>

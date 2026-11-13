@@ -113,6 +113,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/apps/{id}/domains", s.requireAuth(s.handleCreateDomain))
 
 	mux.HandleFunc("GET /api/deployments/{id}", s.requireAuth(s.handleGetDeployment))
+	mux.HandleFunc("POST /api/deployments/{id}/cancel", s.requireAuth(s.handleCancelDeployment))
 	mux.HandleFunc("GET /api/deployments/{id}/log", s.requireAuth(s.handleDeploymentLog))
 	mux.HandleFunc("GET /api/deployments/{id}/log/stream", s.requireAuth(s.handleDeploymentLogStream))
 	mux.HandleFunc("PATCH /api/domains/{id}", s.requireAuth(s.handleUpdateDomain))

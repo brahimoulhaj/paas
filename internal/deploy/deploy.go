@@ -27,6 +27,10 @@ var (
 	ErrBusy = errors.New("another operation on this app is in progress")
 	// ErrNotDeployed means the app has no container to act on yet.
 	ErrNotDeployed = errors.New("the app has not been deployed yet")
+	// ErrNotCancellable means the deployment has finished, or is already switching traffic.
+	ErrNotCancellable = errors.New("the deployment can no longer be cancelled")
+
+	errCancelled = errors.New("cancelled")
 )
 
 // Router is the part of the proxy a deploy needs.
@@ -64,15 +68,28 @@ type Options struct {
 	StartGrace time.Duration
 	// StopGrace is how long a container gets to exit before it is killed.
 	StopGrace time.Duration
+	// MaxBuilds is how many Git builds run at once; 0 = 1. Further Git deploys stay queued
+	// until a build slot frees. Image pulls do not take a slot.
+	MaxBuilds int
 }
 
 type Service struct {
 	opts Options
 	ctx  context.Context // lifetime of background deploys
 
-	mu   sync.Mutex
-	busy map[string]bool // app ids with an operation in progress
-	wg   sync.WaitGroup
+	builds chan struct{} // one token per running build
+
+	mu      sync.Mutex
+	busy    map[string]bool         // app ids with an operation in progress
+	running map[string]*cancellable // unfinished deployments by id
+	wg      sync.WaitGroup
+}
+
+// cancellable is the cancel hook of an unfinished deployment. Once the deployment starts
+// switching traffic, cancelling would leave the proxy half-changed, so it is refused.
+type cancellable struct {
+	cancel    context.CancelCauseFunc
+	switching bool
 }
 
 // New returns a Service whose background deploys stop when ctx is cancelled.
@@ -83,7 +100,40 @@ func New(ctx context.Context, opts Options) *Service {
 	if opts.StopGrace == 0 {
 		opts.StopGrace = 10 * time.Second
 	}
-	return &Service{opts: opts, ctx: ctx, busy: map[string]bool{}}
+	if opts.MaxBuilds < 1 {
+		opts.MaxBuilds = 1
+	}
+	return &Service{opts: opts, ctx: ctx, busy: map[string]bool{}, running: map[string]*cancellable{},
+		builds: make(chan struct{}, opts.MaxBuilds)}
+}
+
+// Cancel stops an unfinished deployment: a queued one never starts, a running one is
+// interrupted (the build or pull is killed, a new container removed) and the previous
+// container keeps serving. It ends with status cancelled. Asynchronous: the deployment
+// record changes when the run notices, usually within a second.
+func (s *Service) Cancel(deploymentID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := s.running[deploymentID]
+	if c == nil || c.switching {
+		return ErrNotCancellable
+	}
+	c.cancel(errCancelled)
+	return nil
+}
+
+// enterSwitch marks the deployment as no longer cancellable. It reports false when a
+// cancel arrived first.
+func (s *Service) enterSwitch(deploymentID string, ctx context.Context) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ctx.Err() != nil {
+		return false
+	}
+	if c := s.running[deploymentID]; c != nil {
+		c.switching = true
+	}
+	return true
 }
 
 // Wait blocks until every background deploy has finished.
@@ -132,20 +182,29 @@ func (s *Service) Deploy(ctx context.Context, appID, trigger string) (store.Depl
 		s.release(appID)
 		return store.Deployment{}, err
 	}
+	ctx, cancel := context.WithCancelCause(s.ctx)
+	s.mu.Lock()
+	s.running[dep.ID] = &cancellable{cancel: cancel}
+	s.mu.Unlock()
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		defer s.release(appID)
-		s.run(app, dep)
+		defer func() {
+			s.mu.Lock()
+			delete(s.running, dep.ID)
+			s.mu.Unlock()
+			cancel(nil)
+		}()
+		s.run(ctx, app, dep)
 	}()
 	return dep, nil
 }
 
 // run is one deployment from start to finish. Whatever happens, the record ends up
 // succeeded or failed, and a failed attempt leaves the previous container serving.
-func (s *Service) run(app store.App, dep store.Deployment) {
+func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) {
 	st, ex := s.opts.Store, s.opts.Executor
-	ctx := s.ctx
 	// Bookkeeping must still be written when ctx is cancelled (shutdown mid-deploy).
 	final := context.WithoutCancel(ctx)
 
@@ -153,21 +212,53 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 	defer logw.close()
 
 	fail := func(containerID string, err error) {
-		msg := err.Error()
-		if ctx.Err() != nil {
+		msg, status, action := err.Error(), store.DeployFailed, "deployment.failed"
+		switch {
+		case errors.Is(context.Cause(ctx), errCancelled):
+			msg, status, action = "cancelled by the user", store.DeployCancelled, "deployment.cancelled"
+			logw.printf("Deployment cancelled")
+		case ctx.Err() != nil:
 			msg = "cancelled: the panel is shutting down"
+			logw.printf("Deployment failed: %s", msg)
+		default:
+			logw.printf("Deployment failed: %s", msg)
 		}
-		logw.printf("Deployment failed: %s", msg)
 		if containerID != "" {
 			if rmErr := ex.RemoveContainer(final, containerID, true); rmErr != nil {
 				s.opts.Log.Error("remove failed deployment container", "error", rmErr)
 			}
 		}
-		if err := st.FinishDeployment(final, dep.ID, store.DeployFailed, msg); err != nil {
+		if err := st.FinishDeployment(final, dep.ID, status, msg); err != nil {
 			s.opts.Log.Error("finish deployment", "error", err)
 		}
-		s.event(final, "deployment.failed", app, msg)
-		s.opts.Log.Warn("deployment failed", "app", app.Name, "deployment", dep.ID, "error", msg)
+		s.event(final, action, app, msg)
+		s.opts.Log.Warn("deployment "+status, "app", app.Name, "deployment", dep.ID, "error", msg)
+	}
+
+	buildDone := func() {}
+	// A build waits, still queued, for a free build slot; the slot is held until the image
+	// exists. Pulls need none.
+	if app.SourceType == store.SourceGit {
+		select {
+		case s.builds <- struct{}{}:
+		default:
+			logw.printf("Waiting for a running build to finish (%d at a time)", cap(s.builds))
+			select {
+			case s.builds <- struct{}{}:
+			case <-ctx.Done():
+				fail("", ctx.Err())
+				return
+			}
+		}
+		held := true
+		releaseSlot := func() {
+			if held {
+				held = false
+				<-s.builds
+			}
+		}
+		defer releaseSlot()
+		buildDone = releaseSlot
 	}
 
 	if err := st.MarkDeploymentRunning(final, dep.ID); err != nil {
@@ -179,7 +270,9 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 	if app.SourceType == store.SourceGit {
 		logw.printf("Deploying %s from %s (branch %s)", app.Name, app.Git.Repository, app.Git.Branch)
 		var err error
-		if image, err = s.build(ctx, final, app, dep, logw); err != nil {
+		image, err = s.build(ctx, final, app, dep, logw)
+		buildDone()
+		if err != nil {
 			fail("", err)
 			return
 		}
@@ -228,7 +321,12 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 		return
 	}
 
-	// 3. Switch: the database first (it is the source of truth), then the proxy.
+	// 3. Switch: the database first (it is the source of truth), then the proxy. From here
+	// a cancel is refused.
+	if !s.enterSwitch(dep.ID, ctx) {
+		fail(containerID, ctx.Err())
+		return
+	}
 	previous := app.CurrentDeploymentID
 	if err := st.SetAppCurrentDeployment(final, app.ID, dep.ID, store.StateRunning); err != nil {
 		fail(containerID, err)

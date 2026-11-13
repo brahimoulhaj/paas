@@ -149,7 +149,7 @@ export type App = {
 export type Deployment = {
   id: string
   app_id: string
-  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
   trigger: string
   /** For a Git app: the image built, empty until the build succeeds. */
   image: string

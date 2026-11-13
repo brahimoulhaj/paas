@@ -27,6 +27,8 @@ type Deployer interface {
 	Stop(ctx context.Context, appID string) error
 	Restart(ctx context.Context, appID string) error
 	Remove(ctx context.Context, appID string) error
+	// Cancel stops an unfinished deployment before it switches traffic.
+	Cancel(deploymentID string) error
 	RuntimeState(ctx context.Context, appID string) string
 	LogPath(dep store.Deployment) string
 	// StreamLogs calls fn for each line of the app's current container until the stream
@@ -557,6 +559,8 @@ func (s *Server) deployError(w http.ResponseWriter, what string, err error) bool
 		writeError(w, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, deploy.ErrBusy):
 		writeError(w, http.StatusConflict, "busy", err.Error())
+	case errors.Is(err, deploy.ErrNotCancellable):
+		writeError(w, http.StatusConflict, "not_cancellable", err.Error())
 	case errors.Is(err, deploy.ErrNotDeployed):
 		writeError(w, http.StatusConflict, "not_deployed", "deploy the app first")
 	default:
@@ -644,6 +648,22 @@ func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toDeploymentJSON(d))
+}
+
+// handleCancelDeployment asks a queued or running deployment to stop. It answers at once
+// (202) with the record as it stands; the status turns cancelled when the run notices.
+func (s *Server) handleCancelDeployment(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDeployer(w) {
+		return
+	}
+	d, err := s.store.GetDeployment(r.Context(), r.PathValue("id"))
+	if s.storeError(w, "get deployment", err, "") {
+		return
+	}
+	if s.deployError(w, "cancel deployment", s.deployer.Cancel(d.ID)) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toDeploymentJSON(d))
 }
 
 // handleDeploymentLog returns the log so far as plain text. Live streaming comes with SSE.

@@ -398,6 +398,8 @@ type fakeBuilder struct {
 	dirs     []string           // workspaces it was given
 	tags     []string           // images it built
 	images   *executortest.Fake // when set, built images are recorded there
+	gate     chan struct{}      // when set, a build waits for a value (or its context)
+	started  chan string        // when set, receives each tag as its build starts
 }
 
 func (b *fakeBuilder) Fetch(_ context.Context, src store.GitSource, auth builder.Auth, dir string, line builder.LineFunc) (string, error) {
@@ -415,7 +417,17 @@ func (b *fakeBuilder) Fetch(_ context.Context, src store.GitSource, auth builder
 	return b.commit, nil
 }
 
-func (b *fakeBuilder) Build(_ context.Context, src store.GitSource, dir, tag, appID string, line builder.LineFunc) error {
+func (b *fakeBuilder) Build(ctx context.Context, src store.GitSource, dir, tag, appID string, line builder.LineFunc) error {
+	if b.started != nil {
+		b.started <- tag
+	}
+	if b.gate != nil {
+		select {
+		case <-b.gate:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	line("#1 [internal] load build definition from " + src.Dockerfile)
@@ -663,5 +675,166 @@ func TestContainerEnvPort(t *testing.T) {
 	git.Environment["PORT"] = "3000"
 	if env := containerEnv(git); env["PORT"] != "3000" {
 		t.Errorf("user PORT overridden: %v", env)
+	}
+}
+
+// gitApp adds another Git app to the env's project.
+func (e *env) gitApp(name string) store.App {
+	e.t.Helper()
+	a, err := e.st.CreateApp(context.Background(), e.app.ProjectID, store.AppInput{
+		Name: name, SourceType: store.SourceGit, Port: 8080,
+		Git: store.GitSource{Repository: "https://example.com/org/" + name + ".git", Branch: "main", Builder: store.BuilderDockerfile, Dockerfile: "Dockerfile"},
+	})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return a
+}
+
+// waitStatus polls a deployment until it has the status, or fails the test.
+func (e *env) waitStatus(id, status string) store.Deployment {
+	e.t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		d, err := e.st.GetDeployment(context.Background(), id)
+		if err != nil {
+			e.t.Fatal(err)
+		}
+		if d.Status == status {
+			return d
+		}
+		if time.Now().After(deadline) {
+			e.t.Fatalf("deployment %s is %s (%s), want %s", id, d.Status, d.Error, status)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+func TestBuildsRunOneAtATime(t *testing.T) {
+	e := newEnv(t)
+	b := &fakeBuilder{commit: strings.Repeat("a", 40), gate: make(chan struct{}), started: make(chan string, 4)}
+	e.useGit(b)
+	other := e.gitApp("api")
+	ctx := context.Background()
+
+	first, err := e.svc.Deploy(ctx, e.app.ID, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-b.started // the first build holds the only slot
+	second, err := e.svc.Deploy(ctx, other.ID, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The second waits, still queued, and says why.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		raw, _ := os.ReadFile(e.svc.LogPath(second))
+		if strings.Contains(string(raw), "Waiting for a running build to finish (1 at a time)") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("second deploy log:\n%s", raw)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if d, _ := e.st.GetDeployment(ctx, second.ID); d.Status != store.DeployQueued {
+		t.Fatalf("second deploy is %s while the first builds, want queued", d.Status)
+	}
+	select {
+	case tag := <-b.started:
+		t.Fatalf("second build %s started while the first was running", tag)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	b.gate <- struct{}{} // first build finishes; its slot goes to the second
+	<-b.started
+	b.gate <- struct{}{}
+	e.svc.Wait()
+	for _, id := range []string{first.ID, second.ID} {
+		if d := e.waitStatus(id, store.DeploySucceeded); d.Image == "" {
+			t.Errorf("deployment %s: %+v", id, d)
+		}
+	}
+}
+
+func TestMaxBuildsRunsInParallel(t *testing.T) {
+	e := newEnv(t)
+	e.svc = New(context.Background(), Options{Store: e.st, Executor: e.ex, Router: e.router, DataDir: e.dir,
+		Log: e.svc.opts.Log, StartGrace: 20 * time.Millisecond, MaxBuilds: 2})
+	b := &fakeBuilder{commit: strings.Repeat("a", 40), gate: make(chan struct{}), started: make(chan string, 4)}
+	e.useGit(b)
+	other := e.gitApp("api")
+	for _, id := range []string{e.app.ID, other.ID} {
+		if _, err := e.svc.Deploy(context.Background(), id, "manual"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 {
+		select {
+		case <-b.started:
+		case <-time.After(5 * time.Second):
+			t.Fatal("two builds did not run at once with MaxBuilds 2")
+		}
+	}
+	close(b.gate)
+	e.svc.Wait()
+}
+
+func TestCancelDeployment(t *testing.T) {
+	e := newEnv(t)
+	good := e.deploy() // the image deploy that keeps serving
+	b := &fakeBuilder{commit: strings.Repeat("c", 40), gate: make(chan struct{}), started: make(chan string, 4)}
+	e.useGit(b)
+	other := e.gitApp("api")
+	ctx := context.Background()
+
+	running, err := e.svc.Deploy(ctx, e.app.ID, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-b.started
+	queued, err := e.svc.Deploy(ctx, other.ID, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A queued deploy never starts.
+	if err := e.svc.Cancel(queued.ID); err != nil {
+		t.Fatal(err)
+	}
+	if d := e.waitStatus(queued.ID, store.DeployCancelled); d.Error != "cancelled by the user" || !d.StartedAt.IsZero() {
+		t.Errorf("cancelled queued deploy: %+v", d)
+	}
+	// A running build is interrupted; the old container keeps serving.
+	if err := e.svc.Cancel(running.ID); err != nil {
+		t.Fatal(err)
+	}
+	e.waitStatus(running.ID, store.DeployCancelled)
+	e.svc.Wait()
+	if cs := e.containers(); len(cs) != 1 || cs[0].Name != good.ContainerName {
+		t.Errorf("containers = %+v, want only the old one", cs)
+	}
+	if a, _ := e.st.GetApp(ctx, e.app.ID); a.CurrentDeploymentID != good.ID {
+		t.Errorf("current deployment = %s, want %s", a.CurrentDeploymentID, good.ID)
+	}
+	raw, _ := os.ReadFile(e.svc.LogPath(running))
+	if !strings.Contains(string(raw), "Deployment cancelled") || strings.Contains(string(raw), "Deployment failed") {
+		t.Errorf("log:\n%s", raw)
+	}
+	events, _ := e.st.ListEvents(ctx, 10)
+	if len(events) == 0 || events[0].Action != "deployment.cancelled" {
+		t.Errorf("latest event = %+v", events)
+	}
+
+	// Finished or unknown deployments cannot be cancelled; the build slot was given back.
+	for _, id := range []string{running.ID, good.ID, "nope"} {
+		if err := e.svc.Cancel(id); !errors.Is(err, ErrNotCancellable) {
+			t.Errorf("Cancel(%s) = %v", id, err)
+		}
+	}
+	close(b.gate)
+	if d := e.deploy(); d.Status != store.DeploySucceeded {
+		t.Errorf("deploy after cancels: %+v", d)
 	}
 }

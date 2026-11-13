@@ -145,7 +145,7 @@ func (s *Server) handleDeploymentLogStream(w http.ResponseWriter, r *http.Reques
 	for {
 		// Status first, file second: once the status says "finished", the file is complete,
 		// so reading it afterwards cannot miss the last lines.
-		finished := dep.Status == store.DeploySucceeded || dep.Status == store.DeployFailed
+		finished := dep.Finished()
 		chunk, err := readFrom(path, offset)
 		if err != nil {
 			s.log.Error("deployment log stream", "error", err)

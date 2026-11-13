@@ -224,8 +224,8 @@ func serve(ctx context.Context, cfg config.Config) error {
 	git := gitsource.New(st, box)
 
 	deployer := deploy.New(ctx, deploy.Options{
-		DataVolume: cfg.DataVolume,
-		Store:      st, Executor: ex, Router: px, Builder: &builder.Local{}, GitAuth: git, DataDir: cfg.DataDir, Log: log,
+		DataVolume: cfg.DataVolume, MaxBuilds: cfg.MaxBuilds,
+		Store: st, Executor: ex, Router: px, Builder: &builder.Local{}, GitAuth: git, DataDir: cfg.DataDir, Log: log,
 	})
 	if n, err := deployer.Recover(ctx); err != nil {
 		return err
