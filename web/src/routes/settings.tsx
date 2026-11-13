@@ -5,6 +5,7 @@ import { Link } from '@tanstack/react-router'
 import { GitConnections } from './settings-git'
 import { ApiTokens } from './settings-tokens'
 import { PanelUpdates } from './settings-updates'
+import { BuildSettingsSection } from './settings-builds'
 import { Button, CheckOption, ConfirmButton, ErrorNote, Field, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
 import { rich, useT } from '../lib/i18n'
 import { api, ApiError, panelDnsQuery, panelSettingsQuery, type PanelSettings } from '../lib/api'
@@ -24,6 +25,7 @@ export function SettingsPage() {
       <PanelUpdates />
       <PanelDomain />
       <GitConnections />
+      <BuildSettingsSection />
       <ApiTokens />
     </div>
   )

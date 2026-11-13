@@ -327,3 +327,11 @@ export const updatesQuery = {
   queryFn: () => api<Updates>('/updates'),
   refetchInterval: 5 * 60_000,
 }
+
+export type BuildLimits = { cpus: number; memory_mb: number }
+export type BuildSettings = BuildLimits & { defaults: BuildLimits; host_cpus: number }
+
+export const buildSettingsQuery = {
+  queryKey: ['settings', 'builds'] as const,
+  queryFn: () => api<BuildSettings>('/settings/builds'),
+}

@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
+	"strconv"
 
 	"panel/internal/id"
 )
@@ -17,7 +19,40 @@ const (
 	SettingOnboarded   = "onboarded_at"        // when the owner finished or skipped the onboarding steps
 	SettingUpdateAuto  = "update_auto"         // "true": apply panel updates on their own
 	SettingUpdateSeen  = "update_seen"         // finished_at of the last update result recorded as an event
+	SettingBuildCPUs   = "build_cpus"          // CPU cap shared by Git builds; "0" = none; absent = the environment's default
+	SettingBuildMemory = "build_memory_mb"     // memory cap (MB) shared by Git builds; "0" = none; absent = the environment's default
 )
+
+// BuildLimits caps the CPU and memory that Git builds share. Zero leaves a resource uncapped.
+type BuildLimits struct {
+	CPUs     float64 `json:"cpus"`
+	MemoryMB int64   `json:"memory_mb"`
+}
+
+// GetBuildLimits returns the build limits saved in Settings; a limit never saved there
+// takes its value from def (the environment).
+func (s *Store) GetBuildLimits(ctx context.Context, def BuildLimits) (BuildLimits, error) {
+	out := def
+	if v, ok, err := s.GetSetting(ctx, SettingBuildCPUs); err != nil {
+		return def, err
+	} else if n, perr := strconv.ParseFloat(v, 64); ok && perr == nil && n >= 0 && !math.IsInf(n, 0) {
+		out.CPUs = n
+	}
+	if v, ok, err := s.GetSetting(ctx, SettingBuildMemory); err != nil {
+		return def, err
+	} else if n, perr := strconv.ParseInt(v, 10, 64); ok && perr == nil && n >= 0 {
+		out.MemoryMB = n
+	}
+	return out, nil
+}
+
+// SetBuildLimits saves both build limits, overriding the environment's defaults.
+func (s *Store) SetBuildLimits(ctx context.Context, l BuildLimits) error {
+	if err := s.SetSetting(ctx, SettingBuildCPUs, strconv.FormatFloat(l.CPUs, 'f', -1, 64)); err != nil {
+		return err
+	}
+	return s.SetSetting(ctx, SettingBuildMemory, strconv.FormatInt(l.MemoryMB, 10))
+}
 
 // GetSetting returns the value and whether the key exists.
 func (s *Store) GetSetting(ctx context.Context, key string) (string, bool, error) {

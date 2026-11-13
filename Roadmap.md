@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build (Railpack and GitLab work on the VPS, 2026-11-13; a single-module Gradle app needs a start command); then CPU and memory caps on builds, and retries / resume after restart for the queue. Time a fresh install.
+**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build (Railpack and GitLab work on the VPS, 2026-11-13; a single-module Gradle app needs a start command); try build caps (`BERTH_BUILD_CPUS`, `BERTH_BUILD_MEMORY_MB`); then retries / resume after restart for the queue. Time a fresh install.
 
 ---
 
@@ -182,7 +182,7 @@ Goal: push-to-deploy from a repository with any of the builders.
 ### Jobs and queue (`internal/jobs`)
 - [ ] SQLite-backed job queue with retries and resume after restart
 - [x] One build at a time by default, configurable — `BERTH_MAX_BUILDS`; a Git deploy waits, still `queued`, for a build slot and says so in its log; the slot is released once the image exists (pulls take none). In memory: a restart fails queued deploys like running ones (`TestBuildsRunOneAtATime`, `TestMaxBuildsRunsInParallel`)
-- [ ] CPU and memory caps on builds
+- [x] CPU and memory caps on builds — Settings → Builds (`GET/PUT/DELETE /api/settings/builds`, `TestBuildSettings`; checked in a browser: save, invalid memory, reset), defaults from `BERTH_BUILD_CPUS`, `BERTH_BUILD_MEMORY_MB` (unset = no cap); read at the start of every build, shared by all builds; Docker's built-in BuildKit ignores per-build limits, so capped builds run on a buildx `docker-container` builder (`moby/buildkit:v0.34.2`) created with the limits on first use and replaced when they change (an old one is removed once no build runs on it); Railpack's label step stays on the daemon's builder, which holds the loaded image. `TestBuildLimits` (stub), `TestBuildMemoryCapEnforced` (real daemon: a 400 MB step killed under a 256 MB cap). Not yet tried on the VPS
 - [x] Cancel a queued or running build — `POST /api/deployments/{id}/cancel` and a Cancel button on the deployment log; works until traffic switches (then 409 `not_cancellable`); the build or pull is killed, a new container removed, the live version keeps serving; status `cancelled`, event `deployment.cancelled` (`TestCancelDeployment`). Not yet clicked in a browser
 - [ ] Cron scheduler (`robfig/cron`)
 

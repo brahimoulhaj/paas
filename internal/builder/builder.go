@@ -7,7 +7,9 @@ package builder
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +20,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"panel/internal/brand"
@@ -34,6 +37,19 @@ const RailpackVersion = "0.43.0"
 // RailpackFrontend is the BuildKit frontend image for plans made by RailpackVersion.
 const RailpackFrontend = "ghcr.io/railwayapp/railpack-frontend:v" + RailpackVersion
 
+// BuildKitImage runs the capped builder (see Limits): the release buildx's own
+// buildx-stable-1 tag pointed at when this was pinned.
+const BuildKitImage = "moby/buildkit:v0.34.2"
+
+// Limits caps the CPU and memory that builds use, all builds together. Zero leaves a
+// resource uncapped; the zero value builds on the daemon's own BuildKit, as before.
+type Limits struct {
+	CPUs     float64
+	MemoryMB int64
+}
+
+func (l Limits) capped() bool { return l.CPUs > 0 || l.MemoryMB > 0 }
+
 // Local runs git, docker and railpack on the panel's own host.
 type Local struct {
 	Git      string // git binary; empty = "git"
@@ -41,6 +57,136 @@ type Local struct {
 	Railpack string // railpack binary; empty = "railpack"
 	// RailpackFrontend overrides the BuildKit frontend image; empty = RailpackFrontend.
 	RailpackFrontend string
+	// Limits caps builds. BuildKit inside dockerd ignores per-build limits, so a capped
+	// build runs on a buildx builder of its own: a BuildKit container created with the
+	// limits (docker-container driver), sharing the same daemon.
+	Limits Limits
+	// LimitsFunc, when set, is asked for the limits at the start of every build (they can
+	// change in Settings) and replaces Limits.
+	LimitsFunc func(context.Context) (Limits, error)
+	// BuildKitImage overrides the capped builder's image; empty = BuildKitImage.
+	BuildKitImage string
+
+	mu    sync.Mutex
+	ready string         // name of the capped builder known to exist
+	swept bool           // builders left by an earlier run were looked for
+	inUse map[string]int // builds running on each capped builder
+}
+
+func (l *Local) limits(ctx context.Context) (Limits, error) {
+	if l.LimitsFunc == nil {
+		return l.Limits, nil
+	}
+	lim, err := l.LimitsFunc(ctx)
+	if err != nil {
+		return Limits{}, fmt.Errorf("read build limits: %w", err)
+	}
+	return lim, nil
+}
+
+// builderName names the capped builder after its settings, so changing the limits or the
+// image makes a new builder instead of reusing one created with the old settings.
+func (l *Local) builderName(lim Limits) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%g/%d/%s", lim.CPUs, lim.MemoryMB, l.buildkitImage()))
+	return brand.Slug + "-build-" + hex.EncodeToString(sum[:4])
+}
+
+func (l *Local) buildkitImage() string {
+	if l.BuildKitImage == "" {
+		return BuildKitImage
+	}
+	return l.BuildKitImage
+}
+
+// ensureBuilder returns the --builder arguments for a heavy build step, and a release
+// function to call once that step is over: no arguments when builds are not capped,
+// otherwise the capped builder, created on first use. Capped builders made for other
+// limits are removed with their cache once no build runs on them.
+func (l *Local) ensureBuilder(ctx context.Context, line LineFunc) ([]string, func(), error) {
+	lim, err := l.limits(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !lim.capped() {
+		if l.ready != "" || !l.swept {
+			l.sweep(ctx, "")
+			l.ready, l.swept = "", true
+		}
+		return nil, func() {}, nil
+	}
+	name := l.builderName(lim)
+	if l.ready != name {
+		found := l.sweep(ctx, name)
+		l.swept = true
+		if !found {
+			say(line, "Creating the build container ("+lim.String()+")")
+			args := []string{"buildx", "create", "--name", name, "--driver", "docker-container",
+				"--driver-opt", "image=" + l.buildkitImage()}
+			if lim.CPUs > 0 {
+				args = append(args, "--driver-opt", "cpu-period=100000",
+					"--driver-opt", fmt.Sprintf("cpu-quota=%d", int64(lim.CPUs*100000)))
+			}
+			if lim.MemoryMB > 0 {
+				// Swap equal to memory: no swap, a build over the cap is killed instead of thrashing.
+				m := fmt.Sprintf("%dm", lim.MemoryMB)
+				args = append(args, "--driver-opt", "memory="+m, "--driver-opt", "memory-swap="+m)
+			}
+			args = append(args, "--bootstrap")
+			if err := run(ctx, line, os.Environ(), l.docker(), args...); err != nil {
+				_ = exec.Command(l.docker(), "buildx", "rm", "--force", name).Run()
+				return nil, nil, fmt.Errorf("create build container: %w", err)
+			}
+		}
+		l.ready = name
+	}
+	if l.inUse == nil {
+		l.inUse = map[string]int{}
+	}
+	l.inUse[name]++
+	release := func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		if l.inUse[name]--; l.inUse[name] <= 0 {
+			delete(l.inUse, name)
+		}
+	}
+	return []string{"--builder", name}, release, nil
+}
+
+// sweep removes the capped builders other than keep that no build is using, and reports
+// whether keep exists. Called with l.mu held.
+func (l *Local) sweep(ctx context.Context, keep string) bool {
+	out, err := exec.CommandContext(ctx, l.docker(), "buildx", "ls", "--format", "{{.Name}}").Output()
+	if err != nil {
+		return false // creating keep will report a real problem
+	}
+	found := false
+	for _, b := range strings.Fields(string(out)) {
+		switch {
+		case keep != "" && b == keep:
+			found = true
+		case strings.HasPrefix(b, brand.Slug+"-build-") && l.inUse[b] == 0:
+			_ = exec.CommandContext(ctx, l.docker(), "buildx", "rm", "--force", b).Run()
+		}
+	}
+	return found
+}
+
+// String describes the limits for the deployment log.
+func (l Limits) String() string {
+	var parts []string
+	if l.CPUs > 0 {
+		parts = append(parts, fmt.Sprintf("%g CPU", l.CPUs))
+	}
+	if l.MemoryMB > 0 {
+		parts = append(parts, fmt.Sprintf("%d MB memory", l.MemoryMB))
+	}
+	if len(parts) == 0 {
+		return "no limits"
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (l *Local) railpack() string {
@@ -159,12 +305,17 @@ func (l *Local) buildDockerfile(ctx context.Context, src store.GitSource, dir, t
 	if err != nil {
 		return fmt.Errorf("Dockerfile %q in the build context: %w", src.Dockerfile, err)
 	}
-	args := []string{
-		"buildx", "build", "--progress=plain", "--load",
-		"--tag", tag, "--file", dockerfile,
-		"--label", brand.Slug + ".build=" + appID,
-		contextDir,
+	builder, release, err := l.ensureBuilder(ctx, line)
+	if err != nil {
+		return err
 	}
+	defer release()
+	args := append([]string{"buildx", "build"}, builder...)
+	args = append(args, "--progress=plain", "--load",
+		"--tag", tag, "--file", dockerfile,
+		"--label", brand.Slug+".build="+appID,
+		contextDir,
+	)
 	if err := run(ctx, line, os.Environ(), l.docker(), args...); err != nil {
 		return fmt.Errorf("docker build: %w", err)
 	}
@@ -208,17 +359,26 @@ func (l *Local) buildRailpack(ctx context.Context, src store.GitSource, dir, tag
 		return fmt.Errorf("railpack: %w", err)
 	}
 
+	builder, release, err := l.ensureBuilder(ctx, line)
+	if err != nil {
+		return err
+	}
+	defer release()
 	raw := tag + "-railpack"
 	defer func() {
 		// Untag the unlabelled image; its layers stay with the labelled one.
 		_ = exec.Command(l.docker(), "image", "rm", raw).Run()
 	}()
-	if err := run(ctx, line, os.Environ(), l.docker(), "buildx", "build", "--progress=plain", "--load",
+	args := append([]string{"buildx", "build"}, builder...)
+	args = append(args, "--progress=plain", "--load",
 		"--build-arg", "BUILDKIT_SYNTAX="+l.railpackFrontend(),
-		"--file", plan, "--tag", raw, contextDir); err != nil {
+		"--file", plan, "--tag", raw, contextDir)
+	if err := run(ctx, line, os.Environ(), l.docker(), args...); err != nil {
 		return fmt.Errorf("docker build: %w", err)
 	}
 
+	// The label step stays on the daemon's own builder: it starts FROM the image just
+	// loaded, which only that builder sees, and adds metadata without running anything.
 	empty := filepath.Join(work, "label")
 	if err := os.Mkdir(empty, 0o700); err != nil {
 		return err

@@ -2,6 +2,7 @@
 package config
 
 import (
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,7 +21,11 @@ type Config struct {
 	DataVolume string
 	// MaxBuilds is how many Git builds run at once; more deploys wait, queued.
 	MaxBuilds int
-	Proxy     Proxy
+	// BuildCPUs and BuildMemoryMB cap the CPU and memory all Git builds share; zero leaves
+	// that resource uncapped.
+	BuildCPUs     float64
+	BuildMemoryMB int64
+	Proxy         Proxy
 }
 
 // Proxy configures the Caddy container in front of everything.
@@ -33,14 +38,16 @@ type Proxy struct {
 	PanelUpstream string // how Caddy reaches the panel, host:port
 }
 
-// Load reads <PREFIX>DATA_DIR, <PREFIX>DATA_VOLUME, <PREFIX>MAX_BUILDS, <PREFIX>ADDR, <PREFIX>PUBLIC_URL and the <PREFIX>PROXY_* variables.
+// Load reads <PREFIX>DATA_DIR, <PREFIX>DATA_VOLUME, <PREFIX>MAX_BUILDS, <PREFIX>BUILD_CPUS, <PREFIX>BUILD_MEMORY_MB, <PREFIX>ADDR, <PREFIX>PUBLIC_URL and the <PREFIX>PROXY_* variables.
 func Load() Config {
 	return Config{
-		DataDir:    env("DATA_DIR", brand.DataDir()),
-		Addr:       env("ADDR", ":8080"),
-		PublicURL:  env("PUBLIC_URL", ""),
-		DataVolume: env("DATA_VOLUME", ""),
-		MaxBuilds:  envInt("MAX_BUILDS", 1),
+		DataDir:       env("DATA_DIR", brand.DataDir()),
+		Addr:          env("ADDR", ":8080"),
+		PublicURL:     env("PUBLIC_URL", ""),
+		DataVolume:    env("DATA_VOLUME", ""),
+		MaxBuilds:     envInt("MAX_BUILDS", 1),
+		BuildCPUs:     envFloat("BUILD_CPUS", 0),
+		BuildMemoryMB: int64(envInt("BUILD_MEMORY_MB", 0)),
 		Proxy: Proxy{
 			Image:         env("PROXY_IMAGE", "caddy:2.10.2-alpine"),
 			HTTPPort:      envInt("PROXY_HTTP_PORT", 80),
@@ -71,6 +78,13 @@ func (c Config) BackupDir() string { return filepath.Join(c.DataDir, "backups") 
 
 func envInt(name string, fallback int) int {
 	if n, err := strconv.Atoi(env(name, "")); err == nil && n > 0 {
+		return n
+	}
+	return fallback
+}
+
+func envFloat(name string, fallback float64) float64 {
+	if n, err := strconv.ParseFloat(env(name, ""), 64); err == nil && n > 0 && !math.IsInf(n, 1) {
 		return n
 	}
 	return fallback

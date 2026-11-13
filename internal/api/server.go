@@ -29,6 +29,7 @@ type Server struct {
 	git           *gitsource.Service
 	metrics       HostMetrics
 	dockerMetrics DockerMetrics
+	buildDefaults store.BuildLimits
 
 	logPoll  time.Duration // how often a deployment log stream looks for new lines
 	stop     chan struct{} // closed when the server shuts down; ends open streams
@@ -70,6 +71,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings/panel", s.requireAuth(s.handleGetPanelSettings))
 	mux.HandleFunc("PUT /api/settings/panel", s.requireAuth(s.handlePutPanelSettings))
 	mux.HandleFunc("GET /api/settings/panel/dns", s.requireAuth(s.handlePanelDNS))
+
+	mux.HandleFunc("GET /api/settings/builds", s.requireAuth(s.handleGetBuildSettings))
+	mux.HandleFunc("PUT /api/settings/builds", s.requireAuth(s.handlePutBuildSettings))
+	mux.HandleFunc("DELETE /api/settings/builds", s.requireAuth(s.handleResetBuildSettings))
 
 	mux.HandleFunc("GET /api/onboarding", s.requireAuth(s.handleGetOnboarding))
 	mux.HandleFunc("POST /api/onboarding/complete", s.requireAuth(s.handleCompleteOnboarding))

@@ -63,6 +63,9 @@ Environment:
   %[4]sADDR        listen address (default :8080)
   %[4]sPUBLIC_URL  base URL used when printing links
   %[4]sDATA_VOLUME Docker volume holding the data dir, when the panel runs in a container
+  %[4]sMAX_BUILDS  Git builds that run at once (default 1)
+  %[4]sBUILD_CPUS, %[4]sBUILD_MEMORY_MB
+                    default CPU and memory all builds share (no cap); changeable in Settings
   %[4]sPROXY_HTTP_PORT, %[4]sPROXY_HTTPS_PORT
                     host ports of the proxy (default 80, 443)
   %[4]sPROXY_ADMIN  how the panel reaches Caddy's admin API: socket (default on Linux) or tcp
@@ -223,9 +226,16 @@ func serve(ctx context.Context, cfg config.Config) error {
 	}
 	git := gitsource.New(st, box)
 
+	// Build limits: the environment gives the defaults, Settings can change them; read at
+	// the start of every build.
+	buildDefaults := store.BuildLimits{CPUs: cfg.BuildCPUs, MemoryMB: cfg.BuildMemoryMB}
+	builds := &builder.Local{LimitsFunc: func(ctx context.Context) (builder.Limits, error) {
+		l, err := st.GetBuildLimits(ctx, buildDefaults)
+		return builder.Limits{CPUs: l.CPUs, MemoryMB: l.MemoryMB}, err
+	}}
 	deployer := deploy.New(ctx, deploy.Options{
 		DataVolume: cfg.DataVolume, MaxBuilds: cfg.MaxBuilds,
-		Store: st, Executor: ex, Router: px, Builder: &builder.Local{}, GitAuth: git, DataDir: cfg.DataDir, Log: log,
+		Store: st, Executor: ex, Router: px, Builder: builds, GitAuth: git, DataDir: cfg.DataDir, Log: log,
 	})
 	if n, err := deployer.Recover(ctx); err != nil {
 		return err
@@ -234,6 +244,7 @@ func serve(ctx context.Context, cfg config.Config) error {
 	}
 
 	apiSrv := api.New(st, acc, log, version, webui.FS())
+	apiSrv.SetBuildDefaults(buildDefaults)
 	metrics := hostmetrics.New(hostmetrics.Options{DataDir: cfg.DataDir, ProcRoot: os.Getenv(brand.EnvPrefix() + "HOST_PROC")})
 	go metrics.Run(ctx)
 	apiSrv.SetHostMetrics(metrics)

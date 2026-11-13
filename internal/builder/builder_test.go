@@ -2,6 +2,7 @@ package builder
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -177,7 +178,13 @@ func stubTools(t *testing.T) (*Local, func() []string) {
 	calls := func() []string {
 		raw, _ := os.ReadFile(logFile)
 		os.Remove(logFile)
-		return strings.Split(strings.TrimSpace(string(raw)), "\n")
+		var out []string
+		for _, c := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			if !strings.HasPrefix(c, "docker buildx ls ") { // the capped-builder sweep, tested in TestBuildLimits
+				out = append(out, c)
+			}
+		}
+		return out
 	}
 	return &Local{Docker: filepath.Join(bin, "docker"), Railpack: filepath.Join(bin, "railpack")}, calls
 }
@@ -271,5 +278,155 @@ func TestBuildRailpack(t *testing.T) {
 	write(t, filepath.Join(empty, "README"), "nothing to build\n")
 	if err := b.Build(context.Background(), src, empty, tag, "app1", nil); err == nil || !strings.Contains(err.Error(), "railpack") {
 		t.Errorf("unbuildable folder: %v", err)
+	}
+}
+
+// TestBuildLimits checks that capped builds run on a builder of their own, created once
+// with the limits, that builders left from other limits are removed, and that the label
+// step stays on the daemon's own builder.
+func TestBuildLimits(t *testing.T) {
+	bin := t.TempDir()
+	logFile := filepath.Join(bin, "calls.log")
+	builders := filepath.Join(bin, "builders")
+	// `docker buildx ls` prints the builders file; every call is logged.
+	write(t, filepath.Join(bin, "docker"), "#!/bin/sh\necho \"docker $*\" >> "+logFile+"\n"+
+		"if [ \"$1 $2\" = \"buildx ls\" ]; then cat "+builders+"; fi\n")
+	write(t, filepath.Join(bin, "railpack"), "#!/bin/sh\necho \"railpack $*\" >> "+logFile+"\n")
+	for _, f := range []string{"docker", "railpack"} {
+		if err := os.Chmod(filepath.Join(bin, f), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := func() []string {
+		raw, _ := os.ReadFile(logFile)
+		os.Remove(logFile)
+		return strings.Split(strings.TrimSpace(string(raw)), "\n")
+	}
+	b := &Local{Docker: filepath.Join(bin, "docker"), Railpack: filepath.Join(bin, "railpack"),
+		Limits: Limits{CPUs: 1.5, MemoryMB: 2048}}
+	name := b.builderName(b.Limits)
+	write(t, builders, "default\norbstack\nberth-build-0123abcd\n")
+
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(parent, "dep1")
+	write(t, filepath.Join(dir, "Dockerfile"), "FROM scratch\n")
+	src := store.GitSource{Builder: store.BuilderDockerfile, Dockerfile: "Dockerfile"}
+	var lines []string
+	if err := b.Build(context.Background(), src, dir, "app-x:abc", "app1", func(l string) { lines = append(lines, l) }); err != nil {
+		t.Fatal(err)
+	}
+	got := calls()
+	want := []string{
+		"docker buildx ls --format {{.Name}}",
+		"docker buildx rm --force berth-build-0123abcd",
+		"docker buildx create --name " + name + " --driver docker-container --driver-opt image=" + BuildKitImage +
+			" --driver-opt cpu-period=100000 --driver-opt cpu-quota=150000 --driver-opt memory=2048m --driver-opt memory-swap=2048m --bootstrap",
+	}
+	if len(got) != 4 || strings.Join(got[:3], "\n") != strings.Join(want, "\n") ||
+		!strings.HasPrefix(got[3], "docker buildx build --builder "+name+" --progress=plain") {
+		t.Errorf("first build calls:\n%s", strings.Join(got, "\n"))
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "Creating the build container (1.5 CPU, 2048 MB memory)") {
+		t.Errorf("lines = %q", lines)
+	}
+
+	// The builder is known now: the next build goes straight to it. Railpack's label step
+	// runs on the daemon's builder, which holds the image just loaded.
+	write(t, builders, "default\n"+name+"\n")
+	src.Builder = store.BuilderRailpack
+	if err := b.Build(context.Background(), src, dir, "app-x:abc", "app1", nil); err != nil {
+		t.Fatal(err)
+	}
+	got = calls()
+	if len(got) != 4 || !strings.HasPrefix(got[1], "docker buildx build --builder "+name+" ") ||
+		strings.Contains(got[2], "--builder") || !strings.Contains(got[2], "--label berth.build=app1") {
+		t.Errorf("railpack calls:\n%s", strings.Join(got, "\n"))
+	}
+
+	// New limits: a new builder, the old one removed.
+	b.Limits = Limits{MemoryMB: 1024}
+	write(t, builders, "default\n"+name+"\n")
+	if err := b.Build(context.Background(), store.GitSource{Builder: store.BuilderDockerfile, Dockerfile: "Dockerfile"}, dir, "app-x:abc", "app1", nil); err != nil {
+		t.Fatal(err)
+	}
+	got = calls()
+	if len(got) != 4 || got[1] != "docker buildx rm --force "+name ||
+		strings.Contains(got[2], "cpu-quota") || !strings.Contains(got[2], "memory=1024m") {
+		t.Errorf("changed limits calls:\n%s", strings.Join(got, "\n"))
+	}
+
+	// Limits read per build (Settings): a build running on the current builder keeps it
+	// when the limits change under it; the next build makes a new one and leaves it alone.
+	name = b.builderName(b.Limits)
+	_, release, err := b.ensureBuilder(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls()
+	b.LimitsFunc = func(context.Context) (Limits, error) { return Limits{CPUs: 2}, nil }
+	write(t, builders, "default\n"+name+"\n")
+	_, release2, err := b.ensureBuilder(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got = calls()
+	if len(got) != 2 || got[0] != "docker buildx ls --format {{.Name}}" || !strings.Contains(got[1], "cpu-quota=200000") {
+		t.Errorf("a builder in use was touched:\n%s", strings.Join(got, "\n"))
+	}
+	release()
+	release2()
+
+	// No limits: stale capped builders go, then the daemon's own builder, nothing created.
+	b.LimitsFunc = func(context.Context) (Limits, error) { return Limits{}, nil }
+	write(t, builders, "default\n"+name+"\n"+b.builderName(Limits{CPUs: 2})+"\n")
+	if err := b.Build(context.Background(), store.GitSource{Builder: store.BuilderDockerfile, Dockerfile: "Dockerfile"}, dir, "app-x:abc", "app1", nil); err != nil {
+		t.Fatal(err)
+	}
+	got = calls()
+	if len(got) != 4 || got[1] != "docker buildx rm --force "+name || got[2] != "docker buildx rm --force "+b.builderName(Limits{CPUs: 2}) ||
+		strings.Contains(got[3], "--builder") {
+		t.Errorf("uncapped calls:\n%s", strings.Join(got, "\n"))
+	}
+	if err := b.Build(context.Background(), store.GitSource{Builder: store.BuilderDockerfile, Dockerfile: "Dockerfile"}, dir, "app-x:abc", "app1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls(); len(got) != 1 {
+		t.Errorf("second uncapped build looked for builders again: %q", got)
+	}
+
+	// A failing limits source fails the build before anything runs.
+	b.LimitsFunc = func(context.Context) (Limits, error) { return Limits{}, errors.New("db closed") }
+	if err := b.Build(context.Background(), store.GitSource{Builder: store.BuilderDockerfile, Dockerfile: "Dockerfile"}, dir, "app-x:abc", "app1", nil); err == nil || !strings.Contains(err.Error(), "read build limits") {
+		t.Errorf("limits error: %v", err)
+	}
+}
+
+// TestBuildMemoryCapEnforced runs a step that needs more memory than the cap on a real
+// capped builder and expects it killed. It never pulls BuildKit: without the pinned image
+// already local it skips (`docker pull` it once to run this).
+func TestBuildMemoryCapEnforced(t *testing.T) {
+	if testing.Short() {
+		t.Skip("needs a Docker daemon")
+	}
+	if err := exec.Command("docker", "image", "inspect", BuildKitImage).Run(); err != nil {
+		t.Skip(BuildKitImage + " not pulled")
+	}
+	b := &Local{Limits: Limits{MemoryMB: 256}}
+	t.Cleanup(func() { exec.Command("docker", "buildx", "rm", "--force", b.builderName(b.Limits)).Run() })
+	dir := t.TempDir()
+	write(t, filepath.Join(dir, "Dockerfile"), "FROM busybox:1.36\nRUN dd if=/dev/zero of=/dev/null bs=400M count=1\n")
+	tag := "panel-builder-test:" + strings.ToLower(t.Name())
+	t.Cleanup(func() { exec.Command("docker", "image", "rm", "-f", tag).Run() })
+	src := store.GitSource{Builder: store.BuilderDockerfile, Dockerfile: "Dockerfile"}
+	var lines []string
+	err := b.Build(context.Background(), src, dir, tag, "app1", func(l string) { lines = append(lines, l) })
+	if err == nil {
+		t.Fatalf("a 400 MB step passed a 256 MB cap:\n%s", strings.Join(lines, "\n"))
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "cannot allocate memory") && !strings.Contains(strings.Join(lines, "\n"), "Killed") {
+		t.Errorf("not killed by the cap: %v\n%s", err, strings.Join(lines, "\n"))
 	}
 }

@@ -105,7 +105,11 @@ berth version
 
 Configuration is by environment: `BERTH_DATA_DIR` (default `/var/lib/berth`), `BERTH_ADDR`
 (default `:8080`), `BERTH_PUBLIC_URL` (base URL for printed links), `BERTH_MAX_BUILDS` (Git builds
-run at once, default 1; further Git deploys wait, queued, and can be cancelled).
+run at once, default 1; further Git deploys wait, queued, and can be cancelled),
+`BERTH_BUILD_CPUS` and `BERTH_BUILD_MEMORY_MB` (default CPU and memory all builds share, e.g.
+`1.5` and `2048`; unset means no cap; Settings → Builds overrides them without a restart). Capped builds run in a BuildKit container of their own
+(`moby/buildkit`, created on the first build, about 100 MB to download) because Docker's
+built-in BuildKit ignores per-build limits; a build step over the memory cap is killed.
 
 The dashboard samples host CPU, RAM, swap, load, uptime, data-disk capacity and network
 traffic every five seconds, keeping ten minutes of history in memory. The disk is the
