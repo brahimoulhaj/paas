@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DnsHintText } from '../components/dns'
+import { DeployHookPanel } from '../components/deploy-hook'
 import { LogViewer } from '../components/logviewer'
 import { Badge, Button, ConfirmButton, cx, Empty, ErrorNote, Field, HelpTip, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
 import {
@@ -567,42 +568,163 @@ function DomainRow({ domain, onChanged }: { domain: Domain; onChanged: () => voi
 
 // ---- settings ----
 
+export const settingsSections = ['general', 'source', 'resources', 'environment', 'volumes', 'webhook', 'danger'] as const
+export type SettingsSection = (typeof settingsSections)[number]
+
+/** App settings, grouped by family: a vertical menu (a strip on phones) and one section. */
 function Settings({ app }: { app: App }) {
   const t = useT()
-  const queryClient = useQueryClient()
-  const navigate = useNavigate()
-  const [source, setSource] = useState(sourceForm(app))
-  const [form, setForm] = useState({
-    name: app.name,
-    port: String(app.port),
-    cpu: String(app.cpu_limit),
-    memory: String(app.memory_limit_mb),
-    start: app.start_command,
-  })
-  const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value })
-  const input: AppInput = {
-    ...sourceInput(source),
-    name: form.name,
-    port: Number(form.port),
-    cpu_limit: Number(form.cpu),
-    memory_limit_mb: Number(form.memory),
-    start_command: form.start.trim(),
-  }
-  const dirty =
-    input.name !== app.name ||
-    sourceChanged(source, app) ||
-    input.port !== app.port ||
-    input.cpu_limit !== app.cpu_limit ||
-    input.memory_limit_mb !== app.memory_limit_mb ||
-    input.start_command !== app.start_command
+  const raw = (useSearch({ strict: false }) as { section?: string }).section
+  const section: SettingsSection = settingsSections.includes(raw as SettingsSection) ? (raw as SettingsSection) : 'general'
+  return (
+    <div className="flex flex-col gap-6 md:flex-row md:items-start">
+      <nav
+        aria-label={t.app.settingsSections.label}
+        className="flex shrink-0 gap-1 overflow-x-auto border-b border-line md:sticky md:top-0 md:w-48 md:flex-col md:overflow-visible md:border-b-0"
+      >
+        {settingsSections.map((name) => (
+          <Link
+            key={name}
+            to="/projects/$projectId/apps/$appId"
+            params={{ projectId: app.project_id, appId: app.id }}
+            search={{ tab: 'settings', section: name }}
+            aria-current={name === section ? 'page' : undefined}
+            className={cx(
+              'border-b-2 px-3 py-1.5 text-start text-sm whitespace-nowrap md:border-b-0 md:border-s-2',
+              name === section ? 'border-accent text-fg md:bg-raised' : 'border-transparent text-muted hover:text-fg',
+              name === 'danger' && name !== section && 'hover:text-danger',
+            )}
+          >
+            {t.app.settingsSections[name]}
+          </Link>
+        ))}
+      </nav>
+      <div className="min-w-0 flex-1 space-y-6">
+        {section === 'general' && <GeneralSettings key={app.id} app={app} />}
+        {section === 'source' && <SourceSettings key={app.id} app={app} />}
+        {section === 'resources' && <ResourceSettings key={app.id} app={app} />}
+        {section === 'environment' && <EnvironmentSettings key={app.id} app={app} />}
+        {section === 'volumes' && <MountSettings key={`mounts-${app.id}`} app={app} />}
+        {section === 'webhook' && <DeployHookPanel app={app} />}
+        {section === 'danger' && <DangerZone app={app} />}
+      </div>
+    </div>
+  )
+}
 
-  const save = useMutation({
-    mutationFn: () => api<App>(`/apps/${app.id}`, { method: 'PATCH', body: input }),
+/** Saves part of an app's settings: the API keeps every field the body leaves out. */
+function useSaveApp(app: App) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: Partial<AppInput>) => api<App>(`/apps/${app.id}`, { method: 'PATCH', body }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: appQuery(app.id).queryKey, exact: true })
       queryClient.invalidateQueries({ queryKey: appsQuery(app.project_id).queryKey })
     },
   })
+}
+
+/** A section's panel and form: the title says it applies on the next deploy. */
+function SectionForm(props: {
+  title: string
+  save: ReturnType<typeof useSaveApp>
+  dirty: boolean
+  onSubmit: () => void
+  children: ReactNode
+}) {
+  const t = useT()
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    props.onSubmit()
+  }
+  return (
+    <Panel title={props.title} actions={<HelpTip label={props.title}>{t.app.appliesNextDeploy}</HelpTip>}>
+      <form onSubmit={submit} className="space-y-4 p-4">
+        {props.children}
+        {props.save.error && <ErrorNote>{props.save.error.message}</ErrorNote>}
+        {props.save.isSuccess && !props.dirty && <p className="text-xs text-accent">{t.common.saved}</p>}
+        <Button type="submit" disabled={!props.dirty || props.save.isPending}>
+          {props.save.isPending ? t.common.saving : t.app.saveSettings}
+        </Button>
+      </form>
+    </Panel>
+  )
+}
+
+function GeneralSettings({ app }: { app: App }) {
+  const t = useT()
+  const save = useSaveApp(app)
+  const [form, setForm] = useState({ name: app.name, port: String(app.port), start: app.start_command })
+  const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value })
+  const body = { name: form.name, port: Number(form.port), start_command: form.start.trim() }
+  const dirty = body.name !== app.name || body.port !== app.port || body.start_command !== app.start_command
+  return (
+    <SectionForm title={t.app.settingsSections.general} save={save} dirty={dirty} onSubmit={() => save.mutate(body)}>
+      <Field
+        label={t.common.name}
+        name="name"
+        required
+        pattern="[a-z0-9]([a-z0-9\-]{0,38}[a-z0-9])?"
+        title={t.app.nameRule}
+        dir="ltr"
+        value={form.name}
+        onChange={set('name')}
+      />
+      <div className="max-w-48">
+        <Field label={t.app.containerPort} name="port" dir="ltr" type="number" required min={1} max={65535} value={form.port} onChange={set('port')} />
+      </div>
+      <Field
+        label={t.app.startCommand}
+        name="start_command"
+        dir="ltr"
+        className="font-mono"
+        maxLength={4096}
+        placeholder={t.app.startCommandDefault}
+        hint={t.app.startCommandHint}
+        value={form.start}
+        onChange={set('start')}
+      />
+    </SectionForm>
+  )
+}
+
+function SourceSettings({ app }: { app: App }) {
+  const t = useT()
+  const save = useSaveApp(app)
+  const [source, setSource] = useState(sourceForm(app))
+  return (
+    <SectionForm
+      title={t.app.settingsSections.source}
+      save={save}
+      dirty={sourceChanged(source, app)}
+      onSubmit={() => save.mutate(sourceInput(source))}
+    >
+      <SourceFields form={source} onChange={setSource} />
+    </SectionForm>
+  )
+}
+
+function ResourceSettings({ app }: { app: App }) {
+  const t = useT()
+  const save = useSaveApp(app)
+  const [form, setForm] = useState({ cpu: String(app.cpu_limit), memory: String(app.memory_limit_mb) })
+  const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value })
+  const body = { cpu_limit: Number(form.cpu), memory_limit_mb: Number(form.memory) }
+  const dirty = body.cpu_limit !== app.cpu_limit || body.memory_limit_mb !== app.memory_limit_mb
+  return (
+    <SectionForm title={t.app.settingsSections.resources} save={save} dirty={dirty} onSubmit={() => save.mutate(body)}>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label={t.app.cpuLimit} name="cpu" dir="ltr" type="number" min={0} max={256} step="0.05" hintTooltip hint={t.app.zeroUnlimited} value={form.cpu} onChange={set('cpu')} />
+        <Field label={t.app.memoryLimit} name="memory" dir="ltr" type="number" min={0} step="1" hintTooltip hint={t.app.zeroUnlimited} value={form.memory} onChange={set('memory')} />
+      </div>
+    </SectionForm>
+  )
+}
+
+function DangerZone({ app }: { app: App }) {
+  const t = useT()
+  const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const remove = useMutation({
     mutationFn: () => api<void>(`/apps/${app.id}`, { method: 'DELETE' }),
     onSuccess: () => {
@@ -611,65 +733,17 @@ function Settings({ app }: { app: App }) {
       navigate({ to: '/projects/$projectId', params: { projectId: app.project_id } })
     },
   })
-
-  function submit(e: FormEvent) {
-    e.preventDefault()
-    save.mutate()
-  }
-
   return (
-    <div className="space-y-6">
-      <Panel title={t.app.tabs.settings} actions={<HelpTip label={t.app.tabs.settings}>{t.app.appliesNextDeploy}</HelpTip>}>
-        <form onSubmit={submit} className="space-y-4 p-4">
-          <Field
-            label={t.common.name}
-            name="name"
-            required
-            pattern="[a-z0-9]([a-z0-9\-]{0,38}[a-z0-9])?"
-            title={t.app.nameRule}
-            dir="ltr"
-            value={form.name}
-            onChange={set('name')}
-          />
-          <SourceFields form={source} onChange={setSource} />
-          <Field
-            label={t.app.startCommand}
-            name="start_command"
-            dir="ltr"
-            className="font-mono"
-            maxLength={4096}
-            placeholder={t.app.startCommandDefault}
-            hint={t.app.startCommandHint}
-            value={form.start}
-            onChange={set('start')}
-          />
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label={t.app.containerPort} name="port" dir="ltr" type="number" required min={1} max={65535} value={form.port} onChange={set('port')} />
-            <Field label={t.app.cpuLimit} name="cpu" dir="ltr" type="number" min={0} max={256} step="0.05" hintTooltip hint={t.app.zeroUnlimited} value={form.cpu} onChange={set('cpu')} />
-            <Field label={t.app.memoryLimit} name="memory" dir="ltr" type="number" min={0} step="1" hintTooltip hint={t.app.zeroUnlimited} value={form.memory} onChange={set('memory')} />
-          </div>
-          {save.error && <ErrorNote>{save.error.message}</ErrorNote>}
-          {save.isSuccess && !dirty && <p className="text-xs text-accent">{t.common.saved}</p>}
-          <Button type="submit" disabled={!dirty || save.isPending}>
-            {save.isPending ? t.common.saving : t.app.saveSettings}
-          </Button>
-        </form>
-      </Panel>
-      <EnvironmentSettings key={app.id} app={app} />
-      <MountSettings key={`mounts-${app.id}`} app={app} />
-      <Panel title={t.app.deleteApp}>
-        <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-          <p className="max-w-md text-xs text-muted">
-            {t.app.deleteAppHint}
-          </p>
-          <ConfirmButton label={t.app.deleteApp} confirm={t.common.yesDelete} pending={remove.isPending} onConfirm={() => remove.mutate()} />
+    <Panel title={t.app.deleteApp}>
+      <div className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <p className="max-w-md text-xs text-muted">{t.app.deleteAppHint}</p>
+        <ConfirmButton label={t.app.deleteApp} confirm={t.common.yesDelete} pending={remove.isPending} onConfirm={() => remove.mutate()} />
+      </div>
+      {remove.error && (
+        <div className="px-4 pb-4">
+          <ErrorNote>{remove.error.message}</ErrorNote>
         </div>
-        {remove.error && (
-          <div className="px-4 pb-4">
-            <ErrorNote>{remove.error.message}</ErrorNote>
-          </div>
-        )}
-      </Panel>
-    </div>
+      )}
+    </Panel>
   )
 }

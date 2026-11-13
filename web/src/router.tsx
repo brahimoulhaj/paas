@@ -89,8 +89,10 @@ const projectRoute = createRoute({ getParentRoute: () => appRoute, path: '/proje
 const appPageRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/projects/$projectId/apps/$appId',
-  validateSearch: (s: Record<string, unknown>): { tab?: AppTab } =>
-    appTabs.includes(s.tab as AppTab) ? { tab: s.tab as AppTab } : {},
+  validateSearch: (s: Record<string, unknown>): { tab?: AppTab; section?: string } => ({
+    ...(appTabs.includes(s.tab as AppTab) ? { tab: s.tab as AppTab } : {}),
+    ...(typeof s.section === 'string' ? { section: s.section } : {}),
+  }),
   component: AppPage,
 })
 const activityRoute = createRoute({ getParentRoute: () => appRoute, path: '/activity', component: ActivityPage })
