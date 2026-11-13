@@ -91,6 +91,7 @@ type Service struct {
 
 	mu      sync.Mutex
 	busy    map[string]bool         // app ids with an operation in progress
+	pending map[string]string       // app id → trigger of one deploy to start once the app is free
 	running map[string]*cancellable // unfinished deployments by id
 	wg      sync.WaitGroup
 }
@@ -119,7 +120,7 @@ func New(ctx context.Context, opts Options) *Service {
 	if opts.RetryDelays == nil {
 		opts.RetryDelays = []time.Duration{2 * time.Second, 5 * time.Second}
 	}
-	return &Service{opts: opts, ctx: ctx, busy: map[string]bool{}, running: map[string]*cancellable{},
+	return &Service{opts: opts, ctx: ctx, busy: map[string]bool{}, pending: map[string]string{}, running: map[string]*cancellable{},
 		builds: make(chan struct{}, opts.MaxBuilds)}
 }
 
@@ -165,10 +166,43 @@ func (s *Service) acquire(appID string) bool {
 	return true
 }
 
+// release frees the app, and starts the deploy queued for it meanwhile, if any.
 func (s *Service) release(appID string) {
 	s.mu.Lock()
 	delete(s.busy, appID)
+	trigger, again := s.pending[appID]
+	delete(s.pending, appID)
 	s.mu.Unlock()
+	if !again || s.ctx.Err() != nil {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		if _, err := s.Deploy(s.ctx, appID, trigger); err != nil && !errors.Is(err, ErrBusy) {
+			s.opts.Log.Warn("queued deploy did not start", "app", appID, "error", err)
+		}
+	}()
+}
+
+// DeployOrQueue deploys like Deploy, but when another operation on the app is in
+// progress it queues one deploy to start once that ends, and reports queued. Several
+// calls meanwhile still make one deploy: it builds what is current when it starts, so a
+// burst of pushes ships the last one.
+func (s *Service) DeployOrQueue(ctx context.Context, appID, trigger string) (store.Deployment, bool, error) {
+	for {
+		dep, err := s.Deploy(ctx, appID, trigger)
+		if !errors.Is(err, ErrBusy) {
+			return dep, false, err
+		}
+		s.mu.Lock()
+		if s.busy[appID] {
+			s.pending[appID] = trigger
+			s.mu.Unlock()
+			return store.Deployment{}, true, nil
+		}
+		s.mu.Unlock() // freed in between: try again
+	}
 }
 
 // Recovery is what Recover did with the deployments a previous panel process left.

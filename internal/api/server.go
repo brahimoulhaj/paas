@@ -23,6 +23,7 @@ type Server struct {
 	version       string
 	web           fs.FS
 	authRate      *rateLimiter
+	hookRate      *rateLimiter // webhook calls per IP
 	proxy         ProxyApplier
 	deployer      Deployer
 	updater       Updater
@@ -49,6 +50,7 @@ func New(st *store.Store, accounts *account.Service, log *slog.Logger, version s
 		version:  version,
 		web:      web,
 		authRate: newRateLimiter(10, 5*time.Minute),
+		hookRate: newRateLimiter(60, time.Minute),
 
 		logPoll: 300 * time.Millisecond,
 		stop:    make(chan struct{}),
@@ -122,6 +124,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/apps/{id}/terminal", s.requireAuth(sessionOnly(s.handleTerminal)))
 	mux.HandleFunc("GET /api/apps/{id}/domains", s.requireAuth(s.handleListDomains))
 	mux.HandleFunc("POST /api/apps/{id}/domains", s.requireAuth(s.handleCreateDomain))
+
+	mux.HandleFunc("GET /api/apps/{id}/deploy-hook", s.requireAuth(s.handleGetDeployHook))
+	mux.HandleFunc("POST /api/apps/{id}/deploy-hook", s.requireAuth(s.handleNewDeployHook))
+	mux.HandleFunc("DELETE /api/apps/{id}/deploy-hook", s.requireAuth(s.handleDeleteDeployHook))
+	mux.HandleFunc("POST /api/hooks/deploy/{token}", s.limit(s.hookRate, s.handleDeployHook))
 
 	mux.HandleFunc("GET /api/deployments/{id}", s.requireAuth(s.handleGetDeployment))
 	mux.HandleFunc("POST /api/deployments/{id}/cancel", s.requireAuth(s.handleCancelDeployment))

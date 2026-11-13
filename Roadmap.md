@@ -228,9 +228,9 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 ### Rollback and triggers
 - [ ] Rollback to a kept image through the same pipeline, without a build
 - [ ] Manual deploy (button and API)
-- [ ] Git push webhooks, filtered by branch and optional path
-- [ ] Deploy webhook `POST /api/hooks/deploy/<token>` with optional image tag or commit
-- [ ] Auto-deploy toggle per app; regenerate deploy token
+- [~] Git push webhooks, filtered by branch and optional path — one URL per app takes push events from GitHub (JSON or its default form encoding), GitLab, Gitea and Forgejo: a push to the app's branch deploys; other branches, tags, deleted branches and other events are ignored with the reason; ping answers OK. Pushes during a deploy queue one follow-up deploy, so a burst ships the last commit (`DeployOrQueue`). `TestDeployHook`; checked against real Docker and Caddy (ping, other branch ignored, three pushes → two deploys, 2026-11-13). No path filter yet; the GitHub App's own webhook is not used (a repository webhook is)
+- [x] Deploy webhook `POST /api/hooks/deploy/<token>` with optional image tag or commit — CI calls it with no event; an image app can pass `{"tag": "…"}` (or `?tag=`), which swaps only the tag of its image (`TestWithTag`). The token (24 random bytes) is the only credential: stored hashed for lookup and encrypted for display (`0011_deploy_hooks.sql`); 60 calls a minute per IP; webhook deploys show as `webhook` / `push` triggers and in the activity as actor `webhook`. Commits: a Git app always builds its branch tip
+- [x] Auto-deploy toggle per app; regenerate deploy token — the webhook is off until turned on; New URL replaces the token, Turn off removes it
 
 ### TLS modes
 - [x] `http_only` (behind Cloudflare proxy) — per domain, chosen when adding it or switched later (`PATCH /api/domains/{id}`); served on :80 with no certificate and no redirect; verified against Caddy in dev and in production: panel domain `ops.azayr.com` behind Cloudflare (SSL Flexible) on a real VPS (2026-11-11)
@@ -242,7 +242,7 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 - [ ] Health check settings
 - [ ] Deployment timeline with per-state timing
 - [ ] Rollback picker
-- [ ] Webhook and auto-deploy settings
+- [x] Webhook and auto-deploy settings — Deploy webhook panel in the app's Settings: URL with Copy, how to add it on GitHub, GitLab and Gitea (or a curl line for image apps), a warning when the panel is reached on a local address
 - [ ] Certificates page
 - [x] Container terminal (WebSocket + xterm.js) — `internal/api/terminal.go`, `internal/executor/terminal.go`, `web/src/components/container-terminal.tsx`; tested in `internal/api/terminal_test.go` and on a real VPS (2026-11-13)
 

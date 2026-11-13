@@ -24,6 +24,8 @@ import (
 // Deployer runs apps; *deploy.Service implements it.
 type Deployer interface {
 	Deploy(ctx context.Context, appID, trigger string) (store.Deployment, error)
+	// DeployOrQueue deploys now, or once the operation in progress on the app ends.
+	DeployOrQueue(ctx context.Context, appID, trigger string) (store.Deployment, bool, error)
 	Start(ctx context.Context, appID string) error
 	Stop(ctx context.Context, appID string) error
 	Restart(ctx context.Context, appID string) error
@@ -71,6 +73,7 @@ type appJSON struct {
 	SourceType          string            `json:"source_type"`
 	Image               string            `json:"image"`
 	RegistryID          string            `json:"registry_id"`
+	DeployHook          bool              `json:"deploy_hook"`
 	Port                int               `json:"port"`
 	CPULimit            float64           `json:"cpu_limit"`
 	MemoryLimitMB       int64             `json:"memory_limit_mb"`
@@ -92,7 +95,7 @@ func toAppJSON(a store.App) appJSON {
 	return appJSON{
 		Mounts:      a.Mounts,
 		Environment: a.Environment,
-		ID:          a.ID, ProjectID: a.ProjectID, Name: a.Name, SourceType: a.SourceType, Image: a.Image, RegistryID: a.RegistryID, Port: a.Port,
+		ID:          a.ID, ProjectID: a.ProjectID, Name: a.Name, SourceType: a.SourceType, Image: a.Image, RegistryID: a.RegistryID, DeployHook: a.DeployHook, Port: a.Port,
 		CPULimit: a.CPULimit, MemoryLimitMB: a.MemoryMB, DesiredState: a.DesiredState,
 		CurrentDeploymentID: a.CurrentDeploymentID,
 		GitSourceID:         a.Git.ConnectionID,

@@ -125,6 +125,8 @@ export type App = {
   source_type: 'image' | 'git'
   /** Image apps: the private registry pulled from with credentials; '' = public. */
   registry_id: string
+  /** The deploy webhook is on. */
+  deploy_hook: boolean
   /** Image apps only; empty for a Git app. */
   image: string
   /** Git connection used to fetch a private repository; empty = public. */
