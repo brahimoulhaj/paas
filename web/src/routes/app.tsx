@@ -270,6 +270,11 @@ function Overview({ app, latest, onOpenDeployments }: { app: App; latest?: Deplo
               <span dir="ltr">{app.image}</span>
             </Fact>
           )}
+          {app.start_command && (
+            <Fact label={t.app.startCommand}>
+              <code dir="ltr" className="[overflow-wrap:anywhere]">{app.start_command}</code>
+            </Fact>
+          )}
           <Fact label={t.app.containerPort}>{app.port}</Fact>
           <Fact label={t.app.limits}>
             {app.cpu_limit > 0 ? t.app.cpuValue(app.cpu_limit) : t.app.cpuUnlimited} ·{' '}
@@ -571,6 +576,7 @@ function Settings({ app }: { app: App }) {
     port: String(app.port),
     cpu: String(app.cpu_limit),
     memory: String(app.memory_limit_mb),
+    start: app.start_command,
   })
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value })
   const input: AppInput = {
@@ -579,13 +585,15 @@ function Settings({ app }: { app: App }) {
     port: Number(form.port),
     cpu_limit: Number(form.cpu),
     memory_limit_mb: Number(form.memory),
+    start_command: form.start.trim(),
   }
   const dirty =
     input.name !== app.name ||
     sourceChanged(source, app) ||
     input.port !== app.port ||
     input.cpu_limit !== app.cpu_limit ||
-    input.memory_limit_mb !== app.memory_limit_mb
+    input.memory_limit_mb !== app.memory_limit_mb ||
+    input.start_command !== app.start_command
 
   const save = useMutation({
     mutationFn: () => api<App>(`/apps/${app.id}`, { method: 'PATCH', body: input }),
@@ -623,6 +631,17 @@ function Settings({ app }: { app: App }) {
             onChange={set('name')}
           />
           <SourceFields form={source} onChange={setSource} />
+          <Field
+            label={t.app.startCommand}
+            name="start_command"
+            dir="ltr"
+            className="font-mono"
+            maxLength={4096}
+            placeholder={t.app.startCommandDefault}
+            hint={t.app.startCommandHint}
+            value={form.start}
+            onChange={set('start')}
+          />
           <div className="grid gap-4 sm:grid-cols-3">
             <Field label={t.app.containerPort} name="port" dir="ltr" type="number" required min={1} max={65535} value={form.port} onChange={set('port')} />
             <Field label={t.app.cpuLimit} name="cpu" dir="ltr" type="number" min={0} max={256} step="0.05" hintTooltip hint={t.app.zeroUnlimited} value={form.cpu} onChange={set('cpu')} />

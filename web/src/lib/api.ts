@@ -135,6 +135,8 @@ export type App = {
   build_context: string
   /** Relative to the build context. */
   dockerfile_path: string
+  /** Replaces the image's entrypoint and command, run by /bin/sh -c; empty = the image's own. */
+  start_command: string
   port: number
   cpu_limit: number
   memory_limit_mb: number
@@ -208,7 +210,7 @@ export type SourceInput =
       dockerfile_path: string
     }
 
-export type AppInput = SourceInput & { environment?: Record<string, string>; name: string; port: number; cpu_limit: number; memory_limit_mb: number }
+export type AppInput = SourceInput & { environment?: Record<string, string>; name: string; start_command?: string; port: number; cpu_limit: number; memory_limit_mb: number }
 
 export const isActive = (d: Deployment) => d.status === 'queued' || d.status === 'running'
 

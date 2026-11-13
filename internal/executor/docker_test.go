@@ -334,33 +334,10 @@ func TestDockerVolumeSubPath(t *testing.T) {
 
 	run := func(name string, mounts []Mount, script string) []string {
 		t.Helper()
-		id, err := d.CreateContainer(ctx, ContainerSpec{
+		return runToEnd(ctx, t, d, ContainerSpec{
 			Name: d.network + "-" + name, Image: testImage, Kind: KindService, ResourceID: name,
 			Command: []string{"sh", "-c", script}, Mounts: mounts, Restart: RestartNo,
 		})
-		if err != nil {
-			t.Fatalf("%s: create: %v", name, err)
-		}
-		if err := d.StartContainer(ctx, id); err != nil {
-			t.Fatalf("%s: start: %v", name, err)
-		}
-		deadline := time.Now().Add(20 * time.Second)
-		for {
-			c, err := d.InspectContainer(ctx, id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !c.Running {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("%s did not finish", name)
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
-		var out []string
-		_ = d.Logs(ctx, id, LogOptions{}, func(l LogLine) { out = append(out, l.Text) })
-		return out
 	}
 
 	// The whole volume, as the panel sees it: create the folders and a file.
@@ -450,5 +427,56 @@ func TestDockerBuildImages(t *testing.T) {
 	}
 	if imgs, _ := d.ListBuildImages(ctx, resource); len(imgs) != 1 || imgs[0].ID != byTag[live] {
 		t.Errorf("build images after removal = %+v", imgs)
+	}
+}
+
+// runToEnd creates and starts a container, waits for it to exit and returns its output.
+func runToEnd(ctx context.Context, t *testing.T, d *Docker, spec ContainerSpec) []string {
+	t.Helper()
+	id, err := d.CreateContainer(ctx, spec)
+	if err != nil {
+		t.Fatalf("%s: create: %v", spec.Name, err)
+	}
+	if err := d.StartContainer(ctx, id); err != nil {
+		t.Fatalf("%s: start: %v", spec.Name, err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		c, err := d.InspectContainer(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !c.Running {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s did not finish", spec.Name)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	var out []string
+	_ = d.Logs(ctx, id, LogOptions{}, func(l LogLine) { out = append(out, l.Text) })
+	return out
+}
+
+func TestDockerEntrypointOverride(t *testing.T) {
+	d := newTestDocker(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := d.EnsureNetwork(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.PullImage(ctx, testImage, nil); err != nil {
+		t.Fatal(err)
+	}
+	// What an app's start command becomes: the shell expands variables and $(...).
+	out := runToEnd(ctx, t, d, ContainerSpec{
+		Name: d.network + "-start", Image: testImage, Kind: KindApp, ResourceID: "start", Restart: RestartNo,
+		Env:        map[string]string{"PORT": "8080"},
+		Entrypoint: []string{"/bin/sh", "-c"},
+		Command:    []string{`echo "port=$PORT files=$(ls -d /etc | wc -l)"`},
+	})
+	if strings.Join(out, "|") != "port=8080 files=1" {
+		t.Errorf("start command printed %q", out)
 	}
 }

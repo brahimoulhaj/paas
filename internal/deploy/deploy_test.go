@@ -678,6 +678,16 @@ func TestContainerEnvPort(t *testing.T) {
 	}
 }
 
+func TestStartCommand(t *testing.T) {
+	if ep, cmd := startCommand(store.App{}); ep != nil || cmd != nil {
+		t.Errorf("no start command = %v %v, want the image's own", ep, cmd)
+	}
+	ep, cmd := startCommand(store.App{StartCommand: "java -jar $(ls build/libs/*.jar)"})
+	if strings.Join(ep, " ") != "/bin/sh -c" || len(cmd) != 1 || cmd[0] != "java -jar $(ls build/libs/*.jar)" {
+		t.Errorf("start command = %q %q", ep, cmd)
+	}
+}
+
 // gitApp adds another Git app to the env's project.
 func (e *env) gitApp(name string) store.App {
 	e.t.Helper()

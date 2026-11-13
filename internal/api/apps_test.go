@@ -388,6 +388,8 @@ func TestGitAppsAPI(t *testing.T) {
 		git(map[string]any{"build_context": "/etc"}),
 		git(map[string]any{"dockerfile_path": "../Dockerfile"}),
 		git(map[string]any{"dockerfile_path": "."}),
+		git(map[string]any{"start_command": strings.Repeat("x", 4097)}),
+		git(map[string]any{"start_command": "a\x00b"}),
 	} {
 		if code, m := e.call("POST", apps, bad); code != 422 {
 			t.Errorf("POST %v = %d %v, want 422", bad, code, m)
@@ -410,6 +412,18 @@ func TestGitAppsAPI(t *testing.T) {
 		if got := e.must(200, "PATCH", "/api/apps/"+id, map[string]any{"builder": b}); got["builder"] != b {
 			t.Errorf("builder %s: %v", b, got["builder"])
 		}
+	}
+
+	// A start command is trimmed, kept by other updates, and cleared with "".
+	start := "java $JAVA_OPTS -jar $(ls -1 build/libs/*jar | grep -v plain)"
+	if got := e.must(200, "PATCH", "/api/apps/"+id, map[string]any{"start_command": "  " + start + "\n"}); got["start_command"] != start {
+		t.Errorf("start_command = %q", got["start_command"])
+	}
+	if got := e.must(200, "PATCH", "/api/apps/"+id, map[string]any{"port": 8081}); got["start_command"] != start {
+		t.Errorf("start_command lost on update: %q", got["start_command"])
+	}
+	if got := e.must(200, "PATCH", "/api/apps/"+id, map[string]any{"start_command": ""}); got["start_command"] != "" {
+		t.Errorf("start_command not cleared: %q", got["start_command"])
 	}
 
 	// Partial update keeps the rest; "." is the repository root.

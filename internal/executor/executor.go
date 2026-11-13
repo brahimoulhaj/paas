@@ -65,6 +65,7 @@ type ContainerSpec struct {
 	ResourceID string            // id of the app, database or service this container belongs to
 	Labels     map[string]string // extra labels, e.g. the deployment id
 	Env        map[string]string
+	Entrypoint []string // overrides the image entrypoint when set
 	Command    []string // overrides the image command when set
 	Ports      []PortBinding
 	Mounts     []Mount

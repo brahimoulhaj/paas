@@ -292,6 +292,10 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 	}
 	name := containerName(app.ID, dep.ID)
 	logw.printf("Creating container %s", name)
+	entrypoint, command := startCommand(app)
+	if command != nil {
+		logw.printf("Start command: %s", app.StartCommand)
+	}
 	containerID, err := ex.CreateContainer(ctx, executor.ContainerSpec{
 		Name:       name,
 		Image:      image,
@@ -301,6 +305,8 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 		CPUs:       app.CPULimit,
 		MemoryMB:   app.MemoryMB,
 		Env:        containerEnv(app),
+		Entrypoint: entrypoint,
+		Command:    command,
 		Mounts:     mounts,
 	})
 	if err != nil {
@@ -458,6 +464,15 @@ func containerEnv(app store.App) map[string]string {
 	}
 	env["PORT"] = strconv.Itoa(app.Port)
 	return env
+}
+
+// startCommand replaces the image's entrypoint and command when the app sets a start
+// command. A shell runs it, so $VARIABLES and $(...) expand as in a Procfile.
+func startCommand(app store.App) (entrypoint, command []string) {
+	if app.StartCommand == "" {
+		return nil, nil
+	}
+	return []string{"/bin/sh", "-c"}, []string{app.StartCommand}
 }
 
 // KeepImages is how many built images of an app survive a deploy, the live one included.

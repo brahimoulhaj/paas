@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build; then CPU and memory caps on builds, and retries / resume after restart for the queue. Try GitLab against the real service. Time a fresh install.
+**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build (Railpack and GitLab work on the VPS, 2026-11-13; a single-module Gradle app needs a start command); then CPU and memory caps on builds, and retries / resume after restart for the queue. Time a fresh install.
 
 ---
 
@@ -171,6 +171,7 @@ Goal: push-to-deploy from a repository with any of the builders.
 - [x] Auto-detect: Dockerfile if present, otherwise Railpack — builder `auto`, the default for new Git apps; checks the configured Dockerfile path inside the build context and says in the deploy log which builder it picked (`TestBuildAutoPicksBuilder`)
 - [x] Dockerfile — `docker buildx build --load` with build context and Dockerfile path checked to stay inside the repository (symlinks followed); image labelled `<slug>.build=<app id>`; checked against a real daemon in `internal/builder/builder_test.go` and on a real VPS (2026-11-13)
 - [x] Railpack — `railpack prepare` writes a plan beside the workspace, `docker buildx build` runs it through the pinned `railpack-frontend` on the same daemon (no separate BuildKit); the frontend drops `--label`, so a one-line `FROM` build re-tags with the build label that pruning relies on; Git apps get `PORT` set to the app port unless their env sets it. Real build in `TestBuildRailpack` (needs `railpack` on PATH or `BERTH_TEST_RAILPACK`)
+- [x] Start command override — per app (image or Git), replaces the image's entrypoint and command with `/bin/sh -c <command>` so `$PORT` and `$(…)` expand; empty keeps the image's own; shown on the overview, set in Settings (`0008_app_start_command.sql`, `TestStartCommand`, `TestDockerEntrypointOverride`). Needed for single-module Gradle apps: Railpack 0.43.0 starts them with `*/build/libs/*jar`, which only matches subprojects (seen on a Spring Boot app from GitLab, 2026-11-13)
 - [ ] Nixpacks — `nixpacks build`
 - [ ] Cloud Native Buildpacks — `pack build --builder <image>` (Heroku / Paketo)
 - [ ] Static — build command, output served by a small Caddy image
@@ -192,7 +193,7 @@ Goal: push-to-deploy from a repository with any of the builders.
 - [ ] App source: image from a private registry
 
 ### UI
-- [~] Git sources settings — Settings → Git connections: connect GitHub, connect GitLab, remove (refused while an app uses it); GitHub connected for real (2026-11-13), GitLab not yet
+- [~] Git sources settings — Settings → Git connections: connect GitHub, connect GitLab, remove (refused while an app uses it); GitHub and GitLab connected for real (2026-11-13)
 - [x] Create-app flow (Git) with builder choice — Automatic, Dockerfile or Railpack; the Dockerfile field hides for Railpack; the app overview shows the builder
 - [ ] Build log stream on the deployment page
 - [x] Env vars editor — `web/src/components/environment.tsx`, with a configurable log line limit in the log viewer

@@ -219,6 +219,7 @@ func (d *Docker) CreateContainer(ctx context.Context, spec ContainerSpec) (strin
 		Config: &container.Config{
 			Image:        spec.Image,
 			Env:          env,
+			Entrypoint:   spec.Entrypoint,
 			Cmd:          spec.Command,
 			Labels:       labels,
 			ExposedPorts: exposed,

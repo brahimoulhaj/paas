@@ -80,6 +80,7 @@ type appJSON struct {
 	Builder             string            `json:"builder"`
 	BuildContext        string            `json:"build_context"`
 	DockerfilePath      string            `json:"dockerfile_path"`
+	StartCommand        string            `json:"start_command"`
 	RuntimeState        string            `json:"runtime_state,omitempty"` // single-app responses only
 	CreatedAt           time.Time         `json:"created_at"`
 	UpdatedAt           time.Time         `json:"updated_at"`
@@ -95,7 +96,8 @@ func toAppJSON(a store.App) appJSON {
 		GitSourceID:         a.Git.ConnectionID,
 		GitRepository:       a.Git.Repository, GitBranch: a.Git.Branch, Builder: a.Git.Builder,
 		BuildContext: a.Git.BuildContext, DockerfilePath: a.Git.Dockerfile,
-		CreatedAt: a.CreatedAt, UpdatedAt: a.UpdatedAt,
+		StartCommand: a.StartCommand,
+		CreatedAt:    a.CreatedAt, UpdatedAt: a.UpdatedAt,
 	}
 }
 
@@ -319,6 +321,7 @@ type appFields struct {
 	Builder        *string            `json:"builder"`
 	BuildContext   *string            `json:"build_context"`
 	DockerfilePath *string            `json:"dockerfile_path"`
+	StartCommand   *string            `json:"start_command"`
 	Port           *int               `json:"port"`
 	CPULimit       *float64           `json:"cpu_limit"`
 	MemoryLimitMB  *int64             `json:"memory_limit_mb"`
@@ -346,6 +349,7 @@ func (f appFields) apply(in store.AppInput) store.AppInput {
 	str(&in.Git.Builder, f.Builder)
 	str(&in.Git.BuildContext, f.BuildContext)
 	str(&in.Git.Dockerfile, f.DockerfilePath)
+	str(&in.StartCommand, f.StartCommand)
 	if f.Port != nil {
 		in.Port = *f.Port
 	}
@@ -445,6 +449,8 @@ func validApp(w http.ResponseWriter, in store.AppInput) bool {
 		invalid(w, "build_context must be a folder inside the repository, like . or services/api")
 	case git && !validRepoPath(g.Dockerfile):
 		invalid(w, "dockerfile_path must be a file inside the build context, like Dockerfile")
+	case len(in.StartCommand) > 4096 || strings.ContainsRune(in.StartCommand, 0):
+		invalid(w, "start_command must be at most 4096 characters, without NUL")
 	case in.Port < 1 || in.Port > 65535:
 		invalid(w, "port must be between 1 and 65535")
 	case in.CPULimit < 0 || in.CPULimit > 256:
@@ -516,7 +522,7 @@ func (s *Server) handleUpdateApp(w http.ResponseWriter, r *http.Request) {
 	}
 	input := in.apply(store.AppInput{
 		Mounts: a.Mounts, Environment: a.Environment, Name: a.Name, SourceType: a.SourceType, Image: a.Image, Git: a.Git,
-		Port: a.Port, CPULimit: a.CPULimit, MemoryMB: a.MemoryMB,
+		StartCommand: a.StartCommand, Port: a.Port, CPULimit: a.CPULimit, MemoryMB: a.MemoryMB,
 	})
 	if !validApp(w, input) || !s.validGitSource(w, r, input) {
 		return
