@@ -6,6 +6,7 @@ const ltr = (s: string) => `⁦${s}⁩`
 export const en = {
   failed: 'DNS check failed.',
   checking: 'Checking DNS…',
+  checkAgain: 'Check again',
   notResolving: 'Does not resolve yet. Create an A record pointing at this server.',
   pointsHere: (addresses: string) => `Resolves to ${addresses} — this server.`,
   pointsElsewhere: (addresses: string, server: string) =>
@@ -16,6 +17,7 @@ export const en = {
 export const fr: typeof en = {
   failed: 'La vérification DNS a échoué.',
   checking: 'Vérification du DNS…',
+  checkAgain: 'Vérifier à nouveau',
   notResolving: 'Ne se résout pas encore. Créez un enregistrement A pointant vers ce serveur.',
   pointsHere: (addresses) => `Se résout vers ${addresses} — ce serveur.`,
   pointsElsewhere: (addresses, server) =>
@@ -26,6 +28,7 @@ export const fr: typeof en = {
 export const ar: typeof en = {
   failed: 'فشل فحص DNS.',
   checking: 'جارٍ فحص DNS…',
+  checkAgain: 'إعادة الفحص',
   notResolving: 'لا يُحلّ بعد. أنشئ سجل A يشير إلى هذا الخادم.',
   pointsHere: (addresses) => `يُحلّ إلى ${ltr(addresses)} — هذا الخادم.`,
   pointsElsewhere: (addresses, server) =>
@@ -36,6 +39,7 @@ export const ar: typeof en = {
 export const es: typeof en = {
   failed: 'La comprobación de DNS ha fallado.',
   checking: 'Comprobando DNS…',
+  checkAgain: 'Comprobar de nuevo',
   notResolving: 'Aún no se resuelve. Crea un registro A que apunte a este servidor.',
   pointsHere: (addresses) => `Se resuelve a ${addresses} — este servidor.`,
   pointsElsewhere: (addresses, server) =>
