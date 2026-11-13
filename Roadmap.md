@@ -7,9 +7,15 @@ name; it lives only in `internal/brand/brand.go`.
 **How to use:** tick a box only when the item is built *and* verified (test or manual run).
 `[ ]` not started · `[~]` in progress · `[x]` done.
 
-**Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
+**Progress:** M0 ◐ · M1 ◐ · M2 ◐ (nearly done) · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build (Railpack and GitLab work on the VPS, 2026-11-13; a single-module Gradle app needs a start command); try build caps (Settings → Builds), a panel update during a deploy (it should resume) a deploy key on a GitHub repository, and a private image from GHCR or Docker Hub. Then push builds to a registry, or M3 (webhooks, health checks, rollback). Time a fresh install.
+**Where we are (2026-11-13, v0.6.0):** M2 is done except pushing builds to a registry, more builders (Nixpacks, Buildpacks, Static), a Gitea token, a build-time env flag and cron. M3 has push/CI webhooks; health checks, rollback and the deploy state machine are next. Released in v0.6.0, not yet checked on a real server: build caps, deploys resumed after a restart, deploy keys, private registries, deploy webhooks, Settings tabs and app settings sections.
+
+**Next up:**
+1. On the VPS with v0.6.0 (manual): set a build cap (Settings → Builds) and deploy a Git app; update or restart the panel during a deploy (it should resume and succeed); deploy a private GitHub repo with a deploy key (`git@github.com:…`); deploy a private image from GHCR or Docker Hub (Registry page); add the deploy webhook to a GitHub repo and push. Still open from before: a Railpack app without a Dockerfile, cancel a build in the browser, time a fresh install.
+2. Code, M3: HTTP health checks before switching traffic (`app_health_checks`), then rollback to one of the 5 kept images without a build, then the deploy timeline per state.
+3. Then: push builds to a registry (closes M2), or M4 databases (Postgres, MariaDB, S3 backups).
+4. Check whether "Build log stream on the deployment page" is already covered by the deployment log (Git build output streams there with `|` lines) and tick it if so.
 
 ---
 
@@ -195,7 +201,8 @@ Goal: push-to-deploy from a repository with any of the builders.
 ### UI
 - [~] Git sources settings — Settings → Git connections: connect GitHub, connect GitLab, remove (refused while an app uses it); GitHub and GitLab connected for real (2026-11-13)
 - [x] Create-app flow (Git) with builder choice — Automatic, Dockerfile or Railpack; the Dockerfile field hides for Railpack; the app overview shows the builder
-- [ ] Build log stream on the deployment page
+- [ ] Build log stream on the deployment page — probably done already (Git build output streams into the deployment log); check and tick
+- [x] App settings in sections — General, Source, Resources, Environment, Volumes, Webhook, Danger zone, in a side menu (a strip on phones), the section in the URL; each saves only its fields
 - [x] Env vars editor — `web/src/components/environment.tsx`, with a configurable log line limit in the log viewer
 - [x] Registries page — its own page (sidebar → Registry), not in Settings: add (server, user, password or read-only token), list, remove
 
@@ -353,7 +360,7 @@ Goal: see what the server is doing and get told when something breaks.
 - [ ] Security review: socket exposure, secrets at rest, webhook token handling, headers
 - [ ] Panel self-backup (SQLite file + key) and restore procedure
 - [ ] Docs: install, first deploy, backups, updates, recovery CLI
-- [x] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog — push a `vX.Y.Z` tag; `.github/workflows/release.yml` publishes `ghcr.io/brahimoulhaj/paas:X.Y.Z` and `:latest` and a GitHub release with generated notes (v0.1.0 → v0.3.1 published)
+- [x] Release pipeline: versioned image (amd64 + arm64), generated `install.sh`, changelog — push a `vX.Y.Z` tag; `.github/workflows/release.yml` publishes `ghcr.io/brahimoulhaj/paas:X.Y.Z` and `:latest` and a GitHub release with generated notes (v0.1.0 → v0.6.0 published)
 
 ## Out of v1
 
