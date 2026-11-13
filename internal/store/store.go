@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"panel/internal/secret"
 )
 
 // ErrNotFound is returned when a single-row lookup matches nothing.
@@ -20,6 +22,7 @@ type Store struct {
 	db        *sql.DB
 	path      string
 	backupDir string
+	box       *secret.Box // encrypts app environments; nil only in tests and tools that never touch apps
 }
 
 // Open opens (creating if needed) the SQLite database at path in WAL mode.

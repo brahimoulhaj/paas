@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — encrypt env vars at rest, then auto-detect with Railpack and the build job queue. Try GitLab against the real service. Time a fresh install.
+**Next up:** M2 — auto-detect with Railpack and the build job queue. Try GitLab against the real service. Time a fresh install.
 
 ---
 
@@ -186,7 +186,7 @@ Goal: push-to-deploy from a repository with any of the builders.
 - [ ] Cron scheduler (`robfig/cron`)
 
 ### Env vars and registries
-- [~] Env vars CRUD, encrypted at rest, build-time flag — per-app variables passed to the container on deploy (`0005_app_environment.sql`, `internal/store/environment_test.go`, `internal/deploy/deploy_test.go`); stored as plain JSON, not encrypted yet; no build-time flag
+- [~] Env vars CRUD, encrypted at rest, build-time flag — per-app variables passed to the container on deploy (`0005_app_environment.sql`, `internal/store/environment_test.go`, `internal/deploy/deploy_test.go`); encrypted at rest with the panel key (AES-GCM, `internal/store/environment.go`); environments stored in clear by earlier versions are encrypted at startup (`TestEnvironmentEncryptedAtRest`); no build-time flag yet (no build arguments exist)
 - [x] Bulk edit / `.env` paste — `web/src/lib/environment.ts` parses and writes `.env` text (comments, `export`, quoted values)
 - [ ] External private registries: add, test credentials, pull with auth
 - [ ] App source: image from a private registry

@@ -69,6 +69,9 @@ func (b *Box) Encrypt(plain []byte) (string, error) {
 	return prefix + base64.RawStdEncoding.EncodeToString(b.aead.Seal(nonce, nonce, plain, nil)), nil
 }
 
+// IsSealed reports whether s looks like a value returned by Encrypt.
+func IsSealed(s string) bool { return strings.HasPrefix(s, prefix) }
+
 func (b *Box) Decrypt(s string) ([]byte, error) {
 	rest, ok := strings.CutPrefix(s, prefix)
 	if !ok {

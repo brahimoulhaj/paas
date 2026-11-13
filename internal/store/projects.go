@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -150,7 +151,7 @@ const appCols = `id, project_id, name, source_type, image, port, cpu_limit, memo
 	desired_state, COALESCE(current_deployment_id, ''),
 	git_repository, git_branch, builder, build_context, dockerfile_path, COALESCE(git_source_id, ''), environment, created_at, updated_at, mounts`
 
-func scanApp(row scanner) (App, error) {
+func (s *Store) scanApp(row scanner) (App, error) {
 	var a App
 	var environment, mounts string
 	var created, updated string
@@ -163,17 +164,14 @@ func scanApp(row scanner) (App, error) {
 	if err != nil {
 		return a, err
 	}
-	if err := json.Unmarshal([]byte(environment), &a.Environment); err != nil {
-		return a, err
+	if a.Environment, err = s.openEnvironment(environment); err != nil {
+		return a, fmt.Errorf("app %s environment: %w", a.ID, err)
 	}
 	if err := json.Unmarshal([]byte(mounts), &a.Mounts); err != nil {
 		return a, err
 	}
 	if a.Mounts == nil {
 		a.Mounts = []AppMount{}
-	}
-	if a.Environment == nil {
-		a.Environment = map[string]string{}
 	}
 	a.CreatedAt, a.UpdatedAt = parseTime(created), parseTime(updated)
 	return a, err
@@ -228,7 +226,7 @@ func (s *Store) CreateApp(ctx context.Context, projectID string, in AppInput) (A
 	if err != nil {
 		return App{}, err
 	}
-	environment, err := json.Marshal(in.Environment)
+	environment, err := s.sealEnvironment(in.Environment)
 	if err != nil {
 		return App{}, err
 	}
@@ -246,7 +244,7 @@ func (s *Store) CreateApp(ctx context.Context, projectID string, in AppInput) (A
 }
 
 func (s *Store) GetApp(ctx context.Context, appID string) (App, error) {
-	return scanApp(s.db.QueryRowContext(ctx, `SELECT `+appCols+` FROM apps WHERE id = ?`, appID))
+	return s.scanApp(s.db.QueryRowContext(ctx, `SELECT `+appCols+` FROM apps WHERE id = ?`, appID))
 }
 
 func (s *Store) AppExists(ctx context.Context, appID string) (bool, error) {
@@ -263,7 +261,7 @@ func (s *Store) ListApps(ctx context.Context, projectID string) ([]App, error) {
 	defer rows.Close()
 	out := []App{}
 	for rows.Next() {
-		a, err := scanApp(rows)
+		a, err := s.scanApp(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -278,7 +276,7 @@ func (s *Store) UpdateApp(ctx context.Context, appID string, in AppInput) (App, 
 	if err != nil {
 		return App{}, err
 	}
-	environment, err := json.Marshal(in.Environment)
+	environment, err := s.sealEnvironment(in.Environment)
 	if err != nil {
 		return App{}, err
 	}

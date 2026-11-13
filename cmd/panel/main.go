@@ -112,7 +112,8 @@ func open(ctx context.Context, cfg config.Config, log *slog.Logger) (*store.Stor
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("data dir: %w", err)
 	}
-	if _, err := secret.LoadOrCreate(cfg.KeyPath()); err != nil {
+	box, err := secret.LoadOrCreate(cfg.KeyPath())
+	if err != nil {
 		return nil, err
 	}
 	st, err := store.Open(cfg.DBPath(), cfg.BackupDir())
@@ -126,6 +127,14 @@ func open(ctx context.Context, cfg config.Config, log *slog.Logger) (*store.Stor
 	}
 	if len(applied) > 0 && log != nil {
 		log.Info("migrations applied", "versions", applied)
+	}
+	sealed, err := st.UseSecrets(ctx, box)
+	if err != nil {
+		st.Close()
+		return nil, fmt.Errorf("encrypt app environments: %w", err)
+	}
+	if sealed > 0 && log != nil {
+		log.Info("app environments encrypted", "apps", sealed)
 	}
 	return st, nil
 }
