@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -143,5 +144,132 @@ func TestGitEnvAuth(t *testing.T) {
 	}
 	if _, err := gitEnv("http://github.com/org/app.git", Auth{Username: "u", Password: "p"}); err == nil {
 		t.Error("credentials were allowed over plain http")
+	}
+}
+
+// TestRailpackPinMatchesImages keeps the Railpack CLI baked into the images at the version
+// whose BuildKit frontend the builder asks for.
+func TestRailpackPinMatchesImages(t *testing.T) {
+	re := regexp.MustCompile(`(?m)^ARG RAILPACK_VERSION=(\S+)$`)
+	for _, f := range []string{"../../Dockerfile", "../../dev/api.Dockerfile"} {
+		raw, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m := re.FindSubmatch(raw)
+		if m == nil || string(m[1]) != RailpackVersion {
+			t.Errorf("%s pins Railpack %q, builder.RailpackVersion is %q", f, m, RailpackVersion)
+		}
+	}
+}
+
+// stubTools writes fake docker and railpack binaries that log their arguments.
+func stubTools(t *testing.T) (*Local, func() []string) {
+	t.Helper()
+	bin := t.TempDir()
+	logFile := filepath.Join(bin, "calls.log")
+	for _, name := range []string{"docker", "railpack"} {
+		write(t, filepath.Join(bin, name), "#!/bin/sh\necho \""+name+" $*\" >> "+logFile+"\n")
+		if err := os.Chmod(filepath.Join(bin, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	calls := func() []string {
+		raw, _ := os.ReadFile(logFile)
+		os.Remove(logFile)
+		return strings.Split(strings.TrimSpace(string(raw)), "\n")
+	}
+	return &Local{Docker: filepath.Join(bin, "docker"), Railpack: filepath.Join(bin, "railpack")}, calls
+}
+
+func TestBuildAutoPicksBuilder(t *testing.T) {
+	b, calls := stubTools(t)
+	parent, err := filepath.EvalSymlinks(t.TempDir()) // the builder resolves symlinks (macOS: /var → /private/var)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(parent, "dep1")
+	write(t, filepath.Join(dir, "api", "package.json"), "{}\n")
+	src := store.GitSource{Builder: store.BuilderAuto, BuildContext: "api", Dockerfile: "Dockerfile"}
+	var lines []string
+	line := func(l string) { lines = append(lines, l) }
+
+	// No Dockerfile: Railpack plans, builds through its frontend, then the label step re-tags.
+	if err := b.Build(context.Background(), src, dir, "app-x:abc", "app1", line); err != nil {
+		t.Fatal(err)
+	}
+	got := calls()
+	if len(got) != 4 ||
+		!strings.HasPrefix(got[0], "railpack prepare "+filepath.Join(dir, "api")) ||
+		!strings.Contains(got[1], "BUILDKIT_SYNTAX="+RailpackFrontend) || !strings.Contains(got[1], "--tag app-x:abc-railpack") ||
+		!strings.Contains(got[2], "--tag app-x:abc --label berth.build=app1") ||
+		got[3] != "docker image rm app-x:abc-railpack" {
+		t.Errorf("railpack calls:\n%s", strings.Join(got, "\n"))
+	}
+	if !strings.Contains(strings.Join(lines, "\n"), "No api/Dockerfile: building with Railpack "+RailpackVersion) {
+		t.Errorf("lines = %q", lines)
+	}
+	if left, _ := filepath.Glob(filepath.Join(parent, "dep1-railpack-*")); len(left) != 0 {
+		t.Errorf("plan folder left behind: %v", left)
+	}
+
+	// With a Dockerfile at the configured path: the Dockerfile wins.
+	write(t, filepath.Join(dir, "api", "Dockerfile"), "FROM scratch\n")
+	if err := b.Build(context.Background(), src, dir, "app-x:abc", "app1", line); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls(); len(got) != 1 || !strings.Contains(got[0], "--file "+filepath.Join(dir, "api", "Dockerfile")) {
+		t.Errorf("dockerfile calls: %q", got)
+	}
+
+	// Railpack forced, Dockerfile ignored.
+	src.Builder = store.BuilderRailpack
+	if err := b.Build(context.Background(), src, dir, "app-x:abc", "app1", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := calls(); len(got) != 4 || !strings.HasPrefix(got[0], "railpack prepare") {
+		t.Errorf("forced railpack calls: %q", got)
+	}
+}
+
+// TestBuildRailpack builds a tiny Node app with the real railpack CLI and frontend. It needs
+// railpack on PATH (or BERTH_TEST_RAILPACK) and network access; the first run downloads a
+// Node toolchain and takes minutes.
+func TestBuildRailpack(t *testing.T) {
+	if testing.Short() {
+		t.Skip("needs a Docker daemon and network")
+	}
+	rp := os.Getenv("BERTH_TEST_RAILPACK")
+	if rp == "" {
+		var err error
+		if rp, err = exec.LookPath("railpack"); err != nil {
+			t.Skip("railpack not installed; set BERTH_TEST_RAILPACK")
+		}
+	}
+	dir := filepath.Join(t.TempDir(), "dep")
+	write(t, filepath.Join(dir, "package.json"), `{"name":"t","version":"1.0.0","scripts":{"start":"node index.js"}}`)
+	write(t, filepath.Join(dir, "index.js"), `require("http").createServer((q,r)=>r.end("ok")).listen(process.env.PORT||3000)`+"\n")
+	tag := "panel-builder-test:" + strings.ToLower(t.Name())
+	t.Cleanup(func() { exec.Command("docker", "image", "rm", "-f", tag).Run() })
+
+	var lines []string
+	b := &Local{Railpack: rp}
+	src := store.GitSource{Builder: store.BuilderAuto, Dockerfile: "Dockerfile"}
+	if err := b.Build(context.Background(), src, dir, tag, "app1", func(l string) { lines = append(lines, l) }); err != nil {
+		t.Fatalf("build: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+	out, err := exec.Command("docker", "image", "inspect", "-f", `{{index .Config.Labels "berth.build"}} {{json .Config.Cmd}}`, tag).Output()
+	if err != nil || strings.TrimSpace(string(out)) != `app1 ["npm run start"]` {
+		t.Errorf("image = %q, %v", out, err)
+	}
+	if err := exec.Command("docker", "image", "inspect", tag+"-railpack").Run(); err == nil {
+		t.Error("the unlabelled image is still tagged")
+	}
+
+	// A folder Railpack cannot plan fails with its own message.
+	empty := filepath.Join(t.TempDir(), "empty")
+	write(t, filepath.Join(empty, "README"), "nothing to build\n")
+	if err := b.Build(context.Background(), src, empty, tag, "app1", nil); err == nil || !strings.Contains(err.Error(), "railpack") {
+		t.Errorf("unbuildable folder: %v", err)
 	}
 }

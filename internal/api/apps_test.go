@@ -378,7 +378,7 @@ func TestGitAppsAPI(t *testing.T) {
 		git(map[string]any{"git_branch": "-x"}),
 		git(map[string]any{"git_branch": "a..b"}),
 		git(map[string]any{"git_branch": "feature/"}),
-		git(map[string]any{"builder": "railpack"}),
+		git(map[string]any{"builder": "nixpacks"}),
 		git(map[string]any{"build_context": "../x"}),
 		git(map[string]any{"build_context": "/etc"}),
 		git(map[string]any{"dockerfile_path": "../Dockerfile"}),
@@ -392,7 +392,7 @@ func TestGitAppsAPI(t *testing.T) {
 	a := e.must(201, "POST", apps, git(map[string]any{"build_context": "./services/api/", "image": "ignored:1"}))
 	want := map[string]any{
 		"source_type": "git", "image": "", "git_repository": "https://github.com/org/api.git", "git_branch": "main",
-		"builder": "dockerfile", "build_context": "services/api", "dockerfile_path": "Dockerfile",
+		"builder": "auto", "build_context": "services/api", "dockerfile_path": "Dockerfile",
 	}
 	for k, v := range want {
 		if a[k] != v {
@@ -400,6 +400,12 @@ func TestGitAppsAPI(t *testing.T) {
 		}
 	}
 	id := a["id"].(string)
+
+	for _, b := range []string{"railpack", "dockerfile", "auto"} {
+		if got := e.must(200, "PATCH", "/api/apps/"+id, map[string]any{"builder": b}); got["builder"] != b {
+			t.Errorf("builder %s: %v", b, got["builder"])
+		}
+	}
 
 	// Partial update keeps the rest; "." is the repository root.
 	a = e.must(200, "PATCH", "/api/apps/"+id, map[string]any{"git_branch": "release/2.0", "build_context": "."})

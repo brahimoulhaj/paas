@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -26,10 +27,34 @@ import (
 // LineFunc receives each output line of a fetch or a build.
 type LineFunc func(line string)
 
-// Local runs git and docker on the panel's own host.
+// RailpackVersion is the Railpack release shipped in the panel image. The BuildKit frontend
+// that turns its plan into an image must be the same version.
+const RailpackVersion = "0.43.0"
+
+// RailpackFrontend is the BuildKit frontend image for plans made by RailpackVersion.
+const RailpackFrontend = "ghcr.io/railwayapp/railpack-frontend:v" + RailpackVersion
+
+// Local runs git, docker and railpack on the panel's own host.
 type Local struct {
-	Git    string // git binary; empty = "git"
-	Docker string // docker binary; empty = "docker"
+	Git      string // git binary; empty = "git"
+	Docker   string // docker binary; empty = "docker"
+	Railpack string // railpack binary; empty = "railpack"
+	// RailpackFrontend overrides the BuildKit frontend image; empty = RailpackFrontend.
+	RailpackFrontend string
+}
+
+func (l *Local) railpack() string {
+	if l.Railpack == "" {
+		return "railpack"
+	}
+	return l.Railpack
+}
+
+func (l *Local) railpackFrontend() string {
+	if l.RailpackFrontend == "" {
+		return RailpackFrontend
+	}
+	return l.RailpackFrontend
 }
 
 func (l *Local) git() string {
@@ -111,6 +136,15 @@ func (l *Local) Build(ctx context.Context, src store.GitSource, dir, tag, appID 
 	switch src.Builder {
 	case store.BuilderDockerfile:
 		return l.buildDockerfile(ctx, src, dir, tag, appID, line)
+	case store.BuilderRailpack:
+		return l.buildRailpack(ctx, src, dir, tag, appID, line)
+	case store.BuilderAuto:
+		if hasDockerfile(dir, src) {
+			say(line, fmt.Sprintf("Found %s: building with the Dockerfile", displayPath(path.Join(src.BuildContext, src.Dockerfile))))
+			return l.buildDockerfile(ctx, src, dir, tag, appID, line)
+		}
+		say(line, fmt.Sprintf("No %s: building with Railpack %s", displayPath(path.Join(src.BuildContext, src.Dockerfile)), RailpackVersion))
+		return l.buildRailpack(ctx, src, dir, tag, appID, line)
 	default:
 		return fmt.Errorf("unknown builder %q", src.Builder)
 	}
@@ -133,6 +167,68 @@ func (l *Local) buildDockerfile(ctx context.Context, src store.GitSource, dir, t
 	}
 	if err := run(ctx, line, os.Environ(), l.docker(), args...); err != nil {
 		return fmt.Errorf("docker build: %w", err)
+	}
+	return nil
+}
+
+// hasDockerfile reports whether the app's Dockerfile exists inside the repository.
+func hasDockerfile(dir string, src store.GitSource) bool {
+	contextDir, err := inside(dir, src.BuildContext, true)
+	if err != nil {
+		return false
+	}
+	_, err = inside(contextDir, src.Dockerfile, false)
+	return err == nil
+}
+
+func say(line LineFunc, s string) {
+	if line != nil {
+		line(s)
+	}
+}
+
+// buildRailpack lets Railpack detect the language and plan the build, then builds the plan
+// with Railpack's BuildKit frontend through buildx, on the same daemon as a Dockerfile.
+// The frontend ignores --label, so the result is re-tagged through a one-line Dockerfile
+// that adds the build label (metadata only, no new layer): pruning finds images by it.
+func (l *Local) buildRailpack(ctx context.Context, src store.GitSource, dir, tag, appID string, line LineFunc) error {
+	contextDir, err := inside(dir, src.BuildContext, true)
+	if err != nil {
+		return fmt.Errorf("build context %q: %w", displayPath(src.BuildContext), err)
+	}
+	// The plan lives next to the workspace, never inside the repository.
+	work, err := os.MkdirTemp(filepath.Dir(dir), filepath.Base(dir)+"-railpack-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(work)
+	plan := filepath.Join(work, "plan.json")
+	if err := run(ctx, line, os.Environ(), l.railpack(), "prepare", contextDir,
+		"--plan-out", plan, "--info-out", filepath.Join(work, "info.json")); err != nil {
+		return fmt.Errorf("railpack: %w", err)
+	}
+
+	raw := tag + "-railpack"
+	defer func() {
+		// Untag the unlabelled image; its layers stay with the labelled one.
+		_ = exec.Command(l.docker(), "image", "rm", raw).Run()
+	}()
+	if err := run(ctx, line, os.Environ(), l.docker(), "buildx", "build", "--progress=plain", "--load",
+		"--build-arg", "BUILDKIT_SYNTAX="+l.railpackFrontend(),
+		"--file", plan, "--tag", raw, contextDir); err != nil {
+		return fmt.Errorf("docker build: %w", err)
+	}
+
+	empty := filepath.Join(work, "label")
+	if err := os.Mkdir(empty, 0o700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(empty, "Dockerfile"), []byte("FROM "+raw+"\n"), 0o600); err != nil {
+		return err
+	}
+	if err := run(ctx, line, os.Environ(), l.docker(), "buildx", "build", "--progress=plain", "--load",
+		"--tag", tag, "--label", brand.Slug+".build="+appID, empty); err != nil {
+		return fmt.Errorf("label image: %w", err)
 	}
 	return nil
 }

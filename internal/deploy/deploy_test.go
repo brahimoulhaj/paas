@@ -647,3 +647,21 @@ func TestDeployPrunesBuildImages(t *testing.T) {
 		t.Errorf("images after Remove = %v", got)
 	}
 }
+
+func TestContainerEnvPort(t *testing.T) {
+	img := store.App{SourceType: store.SourceImage, Port: 80, Environment: map[string]string{"A": "1"}}
+	if env := containerEnv(img); len(env) != 1 {
+		t.Errorf("image app env = %v, want untouched", env)
+	}
+	git := store.App{SourceType: store.SourceGit, Port: 8080, Environment: map[string]string{"A": "1"}}
+	if env := containerEnv(git); env["PORT"] != "8080" || env["A"] != "1" {
+		t.Errorf("git app env = %v, want PORT=8080 added", env)
+	}
+	if _, ok := git.Environment["PORT"]; ok {
+		t.Error("containerEnv changed the app's own map")
+	}
+	git.Environment["PORT"] = "3000"
+	if env := containerEnv(git); env["PORT"] != "3000" {
+		t.Errorf("user PORT overridden: %v", env)
+	}
+}

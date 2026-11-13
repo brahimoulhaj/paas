@@ -361,7 +361,7 @@ func (f appFields) apply(in store.AppInput) store.AppInput {
 			in.Git.Branch = "main"
 		}
 		if in.Git.Builder == "" {
-			in.Git.Builder = store.BuilderDockerfile
+			in.Git.Builder = store.BuilderAuto
 		}
 		if in.Git.Dockerfile == "" {
 			in.Git.Dockerfile = "Dockerfile"
@@ -437,8 +437,8 @@ func validApp(w http.ResponseWriter, in store.AppInput) bool {
 	case git && (!branchRe.MatchString(g.Branch) || strings.Contains(g.Branch, "..") ||
 		strings.HasSuffix(g.Branch, "/") || strings.HasSuffix(g.Branch, ".lock")):
 		invalid(w, "git_branch must be a branch name like main or release/2.0")
-	case git && g.Builder != store.BuilderDockerfile:
-		invalid(w, "builder must be dockerfile")
+	case git && g.Builder != store.BuilderAuto && g.Builder != store.BuilderDockerfile && g.Builder != store.BuilderRailpack:
+		invalid(w, "builder must be auto, dockerfile or railpack")
 	case git && g.BuildContext != "" && !validRepoPath(g.BuildContext):
 		invalid(w, "build_context must be a folder inside the repository, like . or services/api")
 	case git && !validRepoPath(g.Dockerfile):

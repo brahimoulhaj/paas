@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -206,7 +207,7 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 		Labels:     map[string]string{"deployment": dep.ID},
 		CPUs:       app.CPULimit,
 		MemoryMB:   app.MemoryMB,
-		Env:        app.Environment,
+		Env:        containerEnv(app),
 		Mounts:     mounts,
 	})
 	if err != nil {
@@ -342,6 +343,23 @@ func (s *Service) build(ctx, final context.Context, app store.App, dep store.Dep
 	}
 	logw.printf("Built image %s", tag)
 	return tag, nil
+}
+
+// containerEnv is the app's environment, plus PORT set to the app's port for a Git app
+// that does not set it: images built by Railpack (and many others) listen on $PORT.
+func containerEnv(app store.App) map[string]string {
+	if app.SourceType != store.SourceGit {
+		return app.Environment
+	}
+	if _, ok := app.Environment["PORT"]; ok {
+		return app.Environment
+	}
+	env := make(map[string]string, len(app.Environment)+1)
+	for k, v := range app.Environment {
+		env[k] = v
+	}
+	env["PORT"] = strconv.Itoa(app.Port)
+	return env
 }
 
 // KeepImages is how many built images of an app survive a deploy, the live one included.

@@ -255,8 +255,14 @@ function Overview({ app, latest, onOpenDeployments }: { app: App; latest?: Deplo
                 </a>{' '}
                 · <span dir="ltr">{app.git_branch}</span>
               </Fact>
-              <Fact label="Dockerfile">
-                <span dir="ltr">{[app.build_context, app.dockerfile_path].filter(Boolean).join('/')}</span>
+              <Fact label={t.source.builder}>
+                {app.builder === 'railpack' ? 'Railpack' : app.builder === 'auto' ? t.source.builderAuto : 'Dockerfile'}
+                {app.builder !== 'railpack' && (
+                  <>
+                    {' · '}
+                    <span dir="ltr">{[app.build_context, app.dockerfile_path].filter(Boolean).join('/')}</span>
+                  </>
+                )}
               </Fact>
             </>
           ) : (

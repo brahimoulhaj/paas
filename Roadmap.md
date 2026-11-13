@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — auto-detect with Railpack and the build job queue. Try GitLab against the real service. Time a fresh install.
+**Next up:** M2 — deploy a Railpack app (no Dockerfile) on the VPS; then the build job queue (one build at a time, cancel). Try GitLab against the real service. Time a fresh install.
 
 ---
 
@@ -168,13 +168,13 @@ Goal: push-to-deploy from a repository with any of the builders.
 
 ### Builders (`internal/builder`)
 - [x] Builder interface: source dir in, tagged local image out — `internal/builder` (`Fetch`, `Build`); the deploy pipeline builds instead of pulling for Git apps (`internal/deploy`, fake builder tests)
-- [ ] Auto-detect: Dockerfile if present, otherwise Railpack
+- [x] Auto-detect: Dockerfile if present, otherwise Railpack — builder `auto`, the default for new Git apps; checks the configured Dockerfile path inside the build context and says in the deploy log which builder it picked (`TestBuildAutoPicksBuilder`)
 - [x] Dockerfile — `docker buildx build --load` with build context and Dockerfile path checked to stay inside the repository (symlinks followed); image labelled `<slug>.build=<app id>`; checked against a real daemon in `internal/builder/builder_test.go` and on a real VPS (2026-11-13)
-- [ ] Railpack — `railpack` CLI on BuildKit (default)
+- [x] Railpack — `railpack prepare` writes a plan beside the workspace, `docker buildx build` runs it through the pinned `railpack-frontend` on the same daemon (no separate BuildKit); the frontend drops `--label`, so a one-line `FROM` build re-tags with the build label that pruning relies on; Git apps get `PORT` set to the app port unless their env sets it. Real build in `TestBuildRailpack` (needs `railpack` on PATH or `BERTH_TEST_RAILPACK`)
 - [ ] Nixpacks — `nixpacks build`
 - [ ] Cloud Native Buildpacks — `pack build --builder <image>` (Heroku / Paketo)
 - [ ] Static — build command, output served by a small Caddy image
-- [~] Builder CLIs shipped in the panel image, pinned versions — `git`, `docker-cli` and `docker-cli-buildx` from Alpine in the runtime and dev images; not pinned yet
+- [~] Builder CLIs shipped in the panel image, pinned versions — `git`, `docker-cli` and `docker-cli-buildx` from Alpine in the runtime and dev images (not pinned); Railpack 0.43.0 pinned and checksummed in both (+22.5 MB), kept equal to `builder.RailpackVersion` by `TestRailpackPinMatchesImages`
 - [x] Image tag `app-<id>:<commit-sha>`; keep the last 5, prune older — after each successful deploy the newest 5 tagged build images stay (the live one always), older and dangling ones (a commit rebuilt under the same tag) are removed; Docker refuses any image a container still uses; deleting an app removes all its build images. `internal/deploy/deploy_test.go` and `internal/executor/docker_test.go` (real daemon)
 - [ ] Push to the configured registry after a build
 
@@ -193,7 +193,7 @@ Goal: push-to-deploy from a repository with any of the builders.
 
 ### UI
 - [~] Git sources settings — Settings → Git connections: connect GitHub, connect GitLab, remove (refused while an app uses it); GitHub connected for real (2026-11-13), GitLab not yet
-- [ ] Create-app flow (Git) with builder choice
+- [x] Create-app flow (Git) with builder choice — Automatic, Dockerfile or Railpack; the Dockerfile field hides for Railpack; the app overview shows the builder
 - [ ] Build log stream on the deployment page
 - [x] Env vars editor — `web/src/components/environment.tsx`, with a configurable log line limit in the log viewer
 - [ ] Registries settings

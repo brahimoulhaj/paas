@@ -184,16 +184,22 @@ const (
 )
 
 // Builders of a Git app.
-const BuilderDockerfile = "dockerfile"
+const (
+	// BuilderAuto uses the Dockerfile when the repository has one at the configured path,
+	// and Railpack otherwise. The default for new apps.
+	BuilderAuto       = "auto"
+	BuilderDockerfile = "dockerfile"
+	BuilderRailpack   = "railpack"
+)
 
 // GitSource says where a Git app's code is and how it is built.
 type GitSource struct {
 	ConnectionID string // Git connection used to fetch a private repository; "" = public
 	Repository   string // https URL of the repository
 	Branch       string
-	Builder      string // BuilderDockerfile
+	Builder      string // BuilderAuto, BuilderDockerfile or BuilderRailpack
 	BuildContext string // folder inside the repository; "" = its root
-	Dockerfile   string // path relative to the build context
+	Dockerfile   string // path relative to the build context; with BuilderAuto, its presence picks the Dockerfile
 }
 
 // AppInput holds the fields a user can set on an app. Image is used by image apps and

@@ -14,6 +14,7 @@ export type SourceForm = {
   git_source_id: string
   git_repository: string
   git_branch: string
+  builder: 'auto' | 'dockerfile' | 'railpack'
   build_context: string
   dockerfile_path: string
 }
@@ -25,6 +26,7 @@ export function sourceForm(app?: App): SourceForm {
     git_source_id: app?.git_source_id ?? '',
     git_repository: app?.git_repository ?? '',
     git_branch: app?.git_branch || 'main',
+    builder: (app?.builder as SourceForm['builder']) || 'auto',
     build_context: app?.build_context ?? '',
     dockerfile_path: app?.dockerfile_path || 'Dockerfile',
   }
@@ -38,7 +40,7 @@ export function sourceInput(f: SourceForm): SourceInput {
     git_source_id: f.git_source_id,
     git_repository: f.git_repository.trim(),
     git_branch: f.git_branch.trim(),
-    builder: 'dockerfile',
+    builder: f.builder,
     build_context: f.build_context.trim(),
     dockerfile_path: f.dockerfile_path.trim(),
   }
@@ -148,6 +150,19 @@ function GitFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceF
         </div>
       )}
 
+      <ComboField
+        label={t.source.builder}
+        name="builder"
+        options={[
+          { value: 'auto', label: t.source.builderAuto, note: t.source.builderAutoNote },
+          { value: 'dockerfile', label: 'Dockerfile' },
+          { value: 'railpack', label: 'Railpack', note: t.source.builderRailpackNote },
+        ]}
+        value={form.builder}
+        onChange={(b) => onChange({ ...form, builder: b as SourceForm['builder'] })}
+        hint={t.source.builderHint}
+      />
+
       <div className="grid gap-4 sm:grid-cols-2">
         <Field
           label={t.source.buildContext}
@@ -158,16 +173,18 @@ function GitFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceF
           value={form.build_context}
           onChange={set('build_context')}
         />
-        <Field
-          label="Dockerfile"
-          name="dockerfile_path"
-          required
-          dir="ltr"
-          placeholder="Dockerfile"
-          hintTooltip hint={t.source.dockerfileHint}
-          value={form.dockerfile_path}
-          onChange={set('dockerfile_path')}
-        />
+        {form.builder !== 'railpack' && (
+          <Field
+            label="Dockerfile"
+            name="dockerfile_path"
+            required
+            dir="ltr"
+            placeholder="Dockerfile"
+            hintTooltip hint={t.source.dockerfileHint}
+            value={form.dockerfile_path}
+            onChange={set('dockerfile_path')}
+          />
+        )}
       </div>
     </>
   )
