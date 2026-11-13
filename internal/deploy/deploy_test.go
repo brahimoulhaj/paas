@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -393,9 +394,10 @@ type fakeBuilder struct {
 	commit   string
 	fetchErr error
 	buildErr error
-	auth     builder.Auth // credentials of the last fetch
-	dirs     []string     // workspaces it was given
-	tags     []string     // images it built
+	auth     builder.Auth       // credentials of the last fetch
+	dirs     []string           // workspaces it was given
+	tags     []string           // images it built
+	images   *executortest.Fake // when set, built images are recorded there
 }
 
 func (b *fakeBuilder) Fetch(_ context.Context, src store.GitSource, auth builder.Auth, dir string, line builder.LineFunc) (string, error) {
@@ -421,6 +423,9 @@ func (b *fakeBuilder) Build(_ context.Context, src store.GitSource, dir, tag, ap
 		return b.buildErr
 	}
 	b.tags = append(b.tags, tag)
+	if b.images != nil {
+		b.images.AddImage(appID, tag)
+	}
 	return nil
 }
 
@@ -584,5 +589,61 @@ func TestDeployEnvironment(t *testing.T) {
 		if got, ok := ex.environment[k]; !ok || got != v {
 			t.Fatalf("variable %s not passed to container", k)
 		}
+	}
+}
+
+func TestDeployPrunesBuildImages(t *testing.T) {
+	e := newEnv(t)
+	b := &fakeBuilder{images: e.ex}
+	e.useGit(b)
+	ctx := context.Background()
+	tags := func() []string {
+		imgs, err := e.ex.ListBuildImages(ctx, e.app.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, img := range imgs {
+			if len(img.Tags) == 0 {
+				out = append(out, "<dangling>")
+			}
+			out = append(out, img.Tags...)
+		}
+		return out
+	}
+
+	var built []string
+	for i := range KeepImages + 2 {
+		b.commit = strings.Repeat(string(rune('a'+i)), 40)
+		dep := e.deploy()
+		if dep.Status != store.DeploySucceeded {
+			t.Fatalf("deploy %d: %+v", i, dep)
+		}
+		built = append(built, dep.Image)
+	}
+	want := slices.Clone(built[len(built)-KeepImages:])
+	slices.Reverse(want)
+	if got := tags(); !slices.Equal(got, want) {
+		t.Fatalf("images after %d deploys = %v, want newest %d: %v", len(built), got, KeepImages, want)
+	}
+
+	// Rebuilding the live commit moves its tag to a new image; the old one is dangling and goes.
+	dep := e.deploy()
+	if dep.Status != store.DeploySucceeded {
+		t.Fatalf("rebuild: %+v", dep)
+	}
+	if got := tags(); !slices.Equal(got, want) {
+		t.Errorf("images after rebuild = %v, want %v (no dangling)", got, want)
+	}
+	log, _ := os.ReadFile(e.svc.LogPath(dep))
+	if !strings.Contains(string(log), "Removed old image sha256:") {
+		t.Errorf("rebuild log does not mention the dangling image:\n%s", log)
+	}
+
+	if err := e.svc.Remove(ctx, e.app.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := tags(); len(got) != 0 {
+		t.Errorf("images after Remove = %v", got)
 	}
 }

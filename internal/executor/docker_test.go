@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -383,5 +384,71 @@ func TestDockerVolumeSubPath(t *testing.T) {
 		if _, err := d.CreateContainer(ctx, ContainerSpec{Name: d.network + "-bad", Image: testImage, Kind: KindService, ResourceID: "bad", Mounts: []Mount{bad}}); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+func TestDockerBuildImages(t *testing.T) {
+	d := newTestDocker(t)
+	ctx := context.Background()
+	if err := d.PullImage(ctx, testImage, nil); err != nil {
+		t.Fatal(err)
+	}
+	resource := "app1"
+	build := func(tag, marker string) {
+		t.Helper()
+		cmd := exec.CommandContext(ctx, "docker", "build", "-q", "-t", tag, "-")
+		cmd.Stdin = strings.NewReader(fmt.Sprintf("FROM %s\nLABEL %s.build=%s marker=%s\n", testImage, d.prefix, resource, marker))
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("docker build: %v\n%s", err, out)
+		}
+	}
+	old, live := d.prefix+"-app:old", d.prefix+"-app:live"
+	build(old, "1")
+	build(live, "2")
+	t.Cleanup(func() {
+		imgs, _ := d.ListBuildImages(context.Background(), resource)
+		for _, img := range imgs {
+			_, _ = d.cli.ImageRemove(context.Background(), img.ID, client.ImageRemoveOptions{Force: true})
+		}
+	})
+
+	imgs, err := d.ListBuildImages(ctx, resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 2 {
+		t.Fatalf("build images = %+v, want 2", imgs)
+	}
+	byTag := map[string]string{}
+	for _, img := range imgs {
+		for _, tag := range img.Tags {
+			byTag[tag] = img.ID
+		}
+	}
+	if byTag[old] == "" || byTag[live] == "" {
+		t.Fatalf("build images = %+v, want tags %s and %s", imgs, old, live)
+	}
+	if other, _ := d.ListBuildImages(ctx, "app2"); len(other) != 0 {
+		t.Errorf("images of another resource = %+v", other)
+	}
+
+	id, err := d.CreateContainer(ctx, ContainerSpec{Name: d.prefix + "-img", Image: live, Kind: KindApp, ResourceID: resource, Command: []string{"sleep", "60"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.RemoveImage(ctx, byTag[live]); !errors.Is(err, ErrInUse) {
+		t.Errorf("remove image in use: %v, want ErrInUse", err)
+	}
+	if err := d.RemoveImage(ctx, byTag[old]); err != nil {
+		t.Errorf("remove old image: %v", err)
+	}
+	if err := d.RemoveImage(ctx, byTag[old]); err != nil {
+		t.Errorf("remove an image already gone: %v", err)
+	}
+	if err := d.RemoveContainer(ctx, id, true); err != nil {
+		t.Fatal(err)
+	}
+	if imgs, _ := d.ListBuildImages(ctx, resource); len(imgs) != 1 || imgs[0].ID != byTag[live] {
+		t.Errorf("build images after removal = %+v", imgs)
 	}
 }

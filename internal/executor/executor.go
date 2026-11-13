@@ -12,6 +12,9 @@ import (
 // ErrNotFound is returned when a container or image does not exist.
 var ErrNotFound = errors.New("executor: not found")
 
+// ErrInUse is returned when an image cannot be removed because a container uses it.
+var ErrInUse = errors.New("executor: in use")
+
 // Kind says what a managed container is for.
 type Kind string
 
@@ -41,6 +44,12 @@ type Executor interface {
 	InspectContainer(ctx context.Context, id string) (Container, error)
 	// ListContainers returns every container managed by this panel, running or not.
 	ListContainers(ctx context.Context) ([]Container, error)
+	// ListBuildImages returns the images built for resourceID (labelled
+	// "<prefix>.build=<resourceID>" by the builder), newest first.
+	ListBuildImages(ctx context.Context, resourceID string) ([]Image, error)
+	// RemoveImage removes an image by id. An image that is already gone is not an error;
+	// one a container still uses is refused with ErrInUse.
+	RemoveImage(ctx context.Context, id string) error
 	// Logs calls fn for each log line until the stream ends or ctx is cancelled.
 	// With Follow it blocks for as long as the container runs.
 	Logs(ctx context.Context, id string, opts LogOptions, fn func(LogLine)) error
@@ -110,6 +119,13 @@ type Container struct {
 	IP         string // address on the shared network, empty when not running
 	CreatedAt  time.Time
 	StartedAt  time.Time
+}
+
+// Image is a local image.
+type Image struct {
+	ID        string
+	Tags      []string // "repo:tag"; empty for a dangling image
+	CreatedAt time.Time
 }
 
 // PullProgress is one progress update for one image layer.

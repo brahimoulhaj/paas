@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -263,6 +264,8 @@ func (s *Service) run(app store.App, dep store.Deployment) {
 		}
 	}
 
+	s.pruneImages(final, app.ID, image, logw)
+
 	// The last log line goes in before the status changes: a log stream stops reading
 	// once it sees a finished status, and must have the whole file by then.
 	logw.printf("Deployment succeeded")
@@ -339,6 +342,45 @@ func (s *Service) build(ctx, final context.Context, app store.App, dep store.Dep
 	}
 	logw.printf("Built image %s", tag)
 	return tag, nil
+}
+
+// KeepImages is how many built images of an app survive a deploy, the live one included.
+// They are what a rollback can return to without a build.
+const KeepImages = 5
+
+// pruneImages removes an app's build images beyond the newest KeepImages tagged ones, and
+// every dangling one (left when a commit is rebuilt under the same tag). The live image is
+// never removed, and Docker refuses any image a container still uses. Failures are logged:
+// the next deploy tries again.
+func (s *Service) pruneImages(ctx context.Context, appID, live string, logw *logWriter) {
+	images, err := s.opts.Executor.ListBuildImages(ctx, appID)
+	if err != nil {
+		logw.printf("Warning: could not list build images: %v", err)
+		return
+	}
+	kept := 0
+	for _, img := range images { // newest first
+		if slices.Contains(img.Tags, live) {
+			kept++
+			continue
+		}
+		if len(img.Tags) > 0 && kept < KeepImages {
+			kept++
+			continue
+		}
+		name := img.ID
+		if len(img.Tags) > 0 {
+			name = img.Tags[0]
+		}
+		switch err := s.opts.Executor.RemoveImage(ctx, img.ID); {
+		case err == nil:
+			logw.printf("Removed old image %s", name)
+		case errors.Is(err, executor.ErrInUse):
+			// A stopped container of another deploy still holds it; it goes next time.
+		default:
+			logw.printf("Warning: remove image %s: %v", name, err)
+		}
+	}
 }
 
 // imageTag names the image built from one commit of an app: "app-<app id>:<commit>".
@@ -506,6 +548,16 @@ func (s *Service) Remove(ctx context.Context, appID string) error {
 		if c.Kind == executor.KindApp && c.ResourceID == appID {
 			if err := s.opts.Executor.RemoveContainer(ctx, c.ID, true); err != nil {
 				return err
+			}
+		}
+	}
+	// Built images go too. A failure leaves disk used but the app gone, so it is logged only.
+	if images, err := s.opts.Executor.ListBuildImages(ctx, appID); err != nil {
+		s.opts.Log.Error("list build images", "app", appID, "error", err)
+	} else {
+		for _, img := range images {
+			if err := s.opts.Executor.RemoveImage(ctx, img.ID); err != nil {
+				s.opts.Log.Error("remove build image", "app", appID, "image", img.ID, "error", err)
 			}
 		}
 	}

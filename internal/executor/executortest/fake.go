@@ -28,13 +28,14 @@ type Fake struct {
 	containers map[string]*executor.Container // by id
 	logs       map[string][]executor.LogLine  // by container id
 	seq        int
-	Pulled     []string // image refs, in order
+	images     map[string][]executor.Image // build images by resource id
+	Pulled     []string                    // image refs, in order
 }
 
 var _ executor.Executor = (*Fake)(nil)
 
 func New() *Fake {
-	return &Fake{CrashOnStart: map[string]bool{}, RestartLoop: map[string]bool{}, containers: map[string]*executor.Container{}, logs: map[string][]executor.LogLine{}}
+	return &Fake{CrashOnStart: map[string]bool{}, RestartLoop: map[string]bool{}, containers: map[string]*executor.Container{}, images: map[string][]executor.Image{}, logs: map[string][]executor.LogLine{}}
 }
 
 func (f *Fake) Ping(context.Context) error          { return nil }
@@ -150,6 +151,62 @@ func (f *Fake) ListContainers(context.Context) ([]executor.Container, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// AddImage records a build image for resourceID, newer than every image added before.
+// A tag already held by another image moves to the new one, leaving that one dangling,
+// as a rebuild of the same tag does in Docker.
+func (f *Fake) AddImage(resourceID, tag string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, list := range f.images {
+		for i := range list {
+			for j, t := range list[i].Tags {
+				if t == tag {
+					list[i].Tags = append(list[i].Tags[:j:j], list[i].Tags[j+1:]...)
+					break
+				}
+			}
+		}
+	}
+	f.seq++
+	img := executor.Image{ID: fmt.Sprintf("sha256:%04d", f.seq), Tags: []string{tag}, CreatedAt: time.Unix(int64(f.seq), 0)}
+	f.images[resourceID] = append(f.images[resourceID], img)
+}
+
+func (f *Fake) ListBuildImages(_ context.Context, resourceID string) ([]executor.Image, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]executor.Image, 0, len(f.images[resourceID]))
+	for i := len(f.images[resourceID]) - 1; i >= 0; i-- {
+		img := f.images[resourceID][i]
+		img.Tags = append([]string(nil), img.Tags...)
+		out = append(out, img)
+	}
+	return out, nil
+}
+
+// RemoveImage refuses an image whose tag a container uses, like Docker without force.
+func (f *Fake) RemoveImage(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for res, list := range f.images {
+		for i, img := range list {
+			if img.ID != id {
+				continue
+			}
+			for _, c := range f.containers {
+				for _, t := range img.Tags {
+					if c.Image == t {
+						return fmt.Errorf("remove image %s: %w", id, executor.ErrInUse)
+					}
+				}
+			}
+			f.images[res] = append(list[:i:i], list[i+1:]...)
+			return nil
+		}
+	}
+	return nil
 }
 
 // AddLog appends a line to a container's output; a following Logs call receives it.

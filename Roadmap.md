@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — prune old build images (keep the last 5), encrypt env vars at rest, then auto-detect with Railpack and the build job queue. Try GitLab against the real service. Time a fresh install.
+**Next up:** M2 — encrypt env vars at rest, then auto-detect with Railpack and the build job queue. Try GitLab against the real service. Time a fresh install.
 
 ---
 
@@ -175,7 +175,7 @@ Goal: push-to-deploy from a repository with any of the builders.
 - [ ] Cloud Native Buildpacks — `pack build --builder <image>` (Heroku / Paketo)
 - [ ] Static — build command, output served by a small Caddy image
 - [~] Builder CLIs shipped in the panel image, pinned versions — `git`, `docker-cli` and `docker-cli-buildx` from Alpine in the runtime and dev images; not pinned yet
-- [~] Image tag `app-<id>:<commit-sha>`; keep the last 5, prune older — tag done; pruning not yet
+- [x] Image tag `app-<id>:<commit-sha>`; keep the last 5, prune older — after each successful deploy the newest 5 tagged build images stay (the live one always), older and dangling ones (a commit rebuilt under the same tag) are removed; Docker refuses any image a container still uses; deleting an app removes all its build images. `internal/deploy/deploy_test.go` and `internal/executor/docker_test.go` (real daemon)
 - [ ] Push to the configured registry after a build
 
 ### Jobs and queue (`internal/jobs`)

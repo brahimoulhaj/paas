@@ -341,6 +341,41 @@ func (d *Docker) ListContainers(ctx context.Context) ([]Container, error) {
 	return out, nil
 }
 
+func (d *Docker) ListBuildImages(ctx context.Context, resourceID string) ([]Image, error) {
+	res, err := d.cli.ImageList(ctx, client.ImageListOptions{
+		Filters: make(client.Filters).Add("label", d.prefix+".build="+resourceID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list images: %w", err)
+	}
+	out := make([]Image, 0, len(res.Items))
+	for _, s := range res.Items {
+		img := Image{ID: s.ID, CreatedAt: time.Unix(s.Created, 0)}
+		for _, t := range s.RepoTags {
+			if t != "<none>:<none>" {
+				img.Tags = append(img.Tags, t)
+			}
+		}
+		out = append(out, img)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (d *Docker) RemoveImage(ctx context.Context, id string) error {
+	// Not forced: Docker refuses an image a container still uses, which is what keeps the
+	// live image safe. Children are pruned so dangling parent layers go with it.
+	_, err := d.cli.ImageRemove(ctx, id, client.ImageRemoveOptions{PruneChildren: true})
+	switch {
+	case err == nil, cerrdefs.IsNotFound(err):
+		return nil
+	case cerrdefs.IsConflict(err):
+		return fmt.Errorf("remove image %s: %w", id, ErrInUse)
+	default:
+		return fmt.Errorf("remove image %s: %w", id, err)
+	}
+}
+
 func (d *Docker) Logs(ctx context.Context, id string, opts LogOptions, fn func(LogLine)) error {
 	o := client.ContainerLogsOptions{
 		ShowStdout: true,
