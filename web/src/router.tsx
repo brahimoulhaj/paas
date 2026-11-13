@@ -9,7 +9,7 @@ import { OnboardingPage } from './routes/onboarding'
 import { OverviewPage } from './routes/overview'
 import { ProjectPage } from './routes/project'
 import { ProjectsPage } from './routes/projects'
-import { SettingsPage } from './routes/settings'
+import { SettingsPage, settingsTabs, type SettingsTab } from './routes/settings'
 import { SetupPage } from './routes/setup'
 
 type Ctx = { queryClient: QueryClient }
@@ -93,7 +93,15 @@ const appPageRoute = createRoute({
   component: AppPage,
 })
 const activityRoute = createRoute({ getParentRoute: () => appRoute, path: '/activity', component: ActivityPage })
-const settingsRoute = createRoute({ getParentRoute: () => appRoute, path: '/settings', component: SettingsPage })
+const settingsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: '/settings',
+  validateSearch: (s: Record<string, unknown>): { tab?: SettingsTab; git_error?: string } => ({
+    ...(settingsTabs.includes(s.tab as SettingsTab) ? { tab: s.tab as SettingsTab } : {}),
+    ...(typeof s.git_error === 'string' ? { git_error: s.git_error } : {}),
+  }),
+  component: SettingsPage,
+})
 
 const routeTree = rootRoute.addChildren([
   setupRoute,

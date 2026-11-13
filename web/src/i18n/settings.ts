@@ -3,6 +3,8 @@
 export const en = {
   setupGuide: 'Setup guide →',
   panelDomain: 'Panel domain',
+  general: 'General',
+  sections: 'Settings sections',
   what: 'settings',
   removedNotice: 'Domain removed. The panel answers on the server IP again.',
   savedHttpOnly: (url: string) => `Saved. The panel is served on ${url} for your CDN to put HTTPS in front.`,
@@ -27,6 +29,8 @@ export const en = {
 export const fr: typeof en = {
   setupGuide: 'Guide de configuration →',
   panelDomain: 'Domaine du panneau',
+  general: 'Général',
+  sections: 'Sections des réglages',
   what: 'paramètres',
   removedNotice: "Domaine retiré. Le panneau répond de nouveau sur l'adresse IP du serveur.",
   savedHttpOnly: (url) => `Enregistré. Le panneau est servi sur ${url}, votre CDN se chargeant du HTTPS.`,
@@ -53,6 +57,8 @@ export const fr: typeof en = {
 export const ar: typeof en = {
   setupGuide: 'دليل الإعداد ←',
   panelDomain: 'نطاق لوحة التحكم',
+  general: 'عام',
+  sections: 'أقسام الإعدادات',
   what: 'الإعدادات',
   removedNotice: 'تمت إزالة النطاق. عادت لوحة التحكم تستجيب على عنوان IP الخادم.',
   savedHttpOnly: (url) => `تم الحفظ. لوحة التحكم متاحة على ${url} ليضع CDN الخاص بك HTTPS أمامها.`,
@@ -77,6 +83,8 @@ export const ar: typeof en = {
 export const es: typeof en = {
   setupGuide: 'Guía de configuración →',
   panelDomain: 'Dominio del panel',
+  general: 'General',
+  sections: 'Secciones de ajustes',
   what: 'ajustes',
   removedNotice: 'Dominio quitado. El panel vuelve a responder en la IP del servidor.',
   savedHttpOnly: (url) => `Guardado. El panel se sirve en ${url} para que tu CDN ponga HTTPS delante.`,

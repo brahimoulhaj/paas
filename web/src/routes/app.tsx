@@ -31,7 +31,8 @@ export type AppTab = (typeof appTabs)[number]
 export function AppPage() {
   const t = useT()
   const { projectId, appId } = useParams({ strict: false }) as { projectId: string; appId: string }
-  const tab = (useSearch({ strict: false }) as { tab?: AppTab }).tab ?? 'overview'
+  const raw = (useSearch({ strict: false }) as { tab?: string }).tab
+  const tab: AppTab = appTabs.includes(raw as AppTab) ? (raw as AppTab) : 'overview'
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 

@@ -287,7 +287,7 @@ func TestGitHubApp(t *testing.T) {
 	if err := json.Unmarshal([]byte(m.Manifest), &manifest); err != nil {
 		t.Fatal(err)
 	}
-	if manifest.RedirectURL != "https://panel.example.com/api/git-sources/github/callback" || manifest.SetupURL != "https://panel.example.com/settings" ||
+	if manifest.RedirectURL != "https://panel.example.com/api/git-sources/github/callback" || manifest.SetupURL != "https://panel.example.com/settings?tab=git" ||
 		manifest.Public || !strings.HasPrefix(manifest.Name, "berth-") ||
 		fmt.Sprint(manifest.Permissions) != "map[contents:read metadata:read]" {
 		t.Errorf("manifest = %s", m.Manifest)

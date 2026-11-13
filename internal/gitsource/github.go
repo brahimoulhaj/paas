@@ -69,7 +69,7 @@ func (s *Service) StartGitHub(origin, organization, name string) (Manifest, erro
 		"name":                name,
 		"url":                 origin,
 		"redirect_url":        origin + CallbackPath,
-		"setup_url":           origin + "/settings",
+		"setup_url":           origin + "/settings?tab=git",
 		"public":              false,
 		"default_permissions": map[string]string{"contents": "read", "metadata": "read"},
 		"default_events":      []string{},

@@ -112,7 +112,7 @@ func (s *Server) handleGitHubCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.log.Warn("github callback", "error", err)
 		msg := strings.TrimPrefix(err.Error(), gitsource.ErrInvalid.Error()+": ")
-		http.Redirect(w, r, "/settings?git_error="+url.QueryEscape(msg), http.StatusFound)
+		http.Redirect(w, r, "/settings?tab=git&git_error="+url.QueryEscape(msg), http.StatusFound)
 		return
 	}
 	s.audit(r, "git_source.add", "git_source", c.ID, c.Name, "GitHub App")

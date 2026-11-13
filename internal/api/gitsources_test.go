@@ -48,7 +48,7 @@ func TestGitSourcesAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	res.Body.Close()
-	if loc := res.Header.Get("Location"); res.StatusCode != 302 || !strings.HasPrefix(loc, "/settings?git_error=") {
+	if loc := res.Header.Get("Location"); res.StatusCode != 302 || !strings.HasPrefix(loc, "/settings?tab=git&git_error=") {
 		t.Errorf("forged callback = %d %q", res.StatusCode, loc)
 	}
 

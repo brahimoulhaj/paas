@@ -1,17 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState, type FormEvent } from 'react'
 import { DnsHintText } from '../components/dns'
-import { Link } from '@tanstack/react-router'
+import { Link, useSearch } from '@tanstack/react-router'
 import { GitConnections } from './settings-git'
 import { ApiTokens } from './settings-tokens'
 import { PanelUpdates } from './settings-updates'
 import { BuildSettingsSection } from './settings-builds'
-import { Button, CheckOption, ConfirmButton, ErrorNote, Field, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
+import { Button, CheckOption, ConfirmButton, cx, ErrorNote, Field, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
 import { rich, useT } from '../lib/i18n'
 import { api, ApiError, panelDnsQuery, panelSettingsQuery, type PanelSettings } from '../lib/api'
 
+export const settingsTabs = ['general', 'git', 'builds', 'tokens'] as const
+export type SettingsTab = (typeof settingsTabs)[number]
+
 export function SettingsPage() {
   const t = useT()
+  const search = useSearch({ strict: false }) as { tab?: string; git_error?: string }
+  // An unknown tab falls back; GitHub's callback may come back with git_error and no tab.
+  const tab: SettingsTab = settingsTabs.includes(search.tab as SettingsTab)
+    ? (search.tab as SettingsTab)
+    : search.git_error
+      ? 'git'
+      : 'general'
+  const label: Record<SettingsTab, string> = {
+    general: t.settings.general,
+    git: t.settingsGit.title,
+    builds: t.settingsBuilds.title,
+    tokens: t.settingsTokens.title,
+  }
   return (
     <div className="space-y-6">
       <PageHeader
@@ -22,11 +38,31 @@ export function SettingsPage() {
           </Link>
         }
       />
-      <PanelUpdates />
-      <PanelDomain />
-      <GitConnections />
-      <BuildSettingsSection />
-      <ApiTokens />
+      <nav className="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-line" aria-label={t.settings.sections}>
+        {settingsTabs.map((name) => (
+          <Link
+            key={name}
+            to="/settings"
+            search={{ tab: name }}
+            className={cx(
+              'border-b-2 px-3 py-1.5 text-sm whitespace-nowrap',
+              name === tab ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg',
+            )}
+            aria-current={name === tab ? 'page' : undefined}
+          >
+            {label[name]}
+          </Link>
+        ))}
+      </nav>
+      {tab === 'general' && (
+        <>
+          <PanelUpdates />
+          <PanelDomain />
+        </>
+      )}
+      {tab === 'git' && <GitConnections />}
+      {tab === 'builds' && <BuildSettingsSection />}
+      {tab === 'tokens' && <ApiTokens />}
     </div>
   )
 }
