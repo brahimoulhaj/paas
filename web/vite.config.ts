@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       proxy: {
-        '/api': { target: env.API_URL || 'http://localhost:8080', changeOrigin: false, ws: true },
+        '/api': { target: env.API_URL || 'http://localhost:8090', changeOrigin: false, ws: true },
       },
     },
   }

@@ -12,8 +12,8 @@ help:
 	@echo "make dev      - run everything in Docker with live reload (compose watch); open :5173"
 	@echo "make dev-down - stop the compose dev stack"
 	@echo "make dev-import-data - copy ./.data into the compose data volume (replaces what is there)"
-	@echo "make dev-api  - run the Go server on :8080 with data in ./.data (proxy on :8880 / :8443); live reload with air if installed"
-	@echo "make dev-web  - run the Vite dev server (proxies /api to :8080)"
+	@echo "make dev-api  - run the Go server on :8090 with data in ./.data (proxy on :8880 / :8443); live reload with air if installed"
+	@echo "make dev-web  - run the Vite dev server (proxies /api to :8090)"
 	@echo "make web      - build the web app into internal/webui/dist"
 	@echo "make build    - build bin/$(SLUG) with the web app embedded"
 	@echo "make test     - Go tests and web typecheck"
@@ -54,7 +54,7 @@ dev-import-data:
 
 # Dev keeps the proxy off 80/443 so it does not fight a local web server.
 dev-api:
-	$(PREFIX)DATA_DIR=./.data $(PREFIX)PUBLIC_URL=http://localhost:5173 \
+	$(PREFIX)ADDR=:8090 $(PREFIX)DATA_DIR=./.data $(PREFIX)PUBLIC_URL=http://localhost:5173 \
 	$(PREFIX)PROXY_HTTP_PORT=8880 $(PREFIX)PROXY_HTTPS_PORT=8443 \
 	$(if $(shell command -v air),air,go run ./cmd/panel serve)
 

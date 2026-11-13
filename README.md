@@ -31,10 +31,10 @@ cannot deploy; the executor tests skip themselves).
 
 ```sh
 make deps      # go mod tidy (creates go.sum) + pnpm install
-make dev-api   # Go server on :8080, data in ./.data — prints a one-time setup link;
+make dev-api   # Go server on :8090, data in ./.data — prints a one-time setup link;
                # also starts Caddy in Docker on :8880 (HTTP) and :8443 (HTTPS).
                # Rebuilds and restarts on Go changes when `air` is installed (.air.toml)
-make dev-web   # in a second terminal: Vite on :5173, proxies /api to :8080
+make dev-web   # in a second terminal: Vite on :5173, proxies /api to :8090
 ```
 
 Open the setup link from the `dev-api` output, create the owner, and you are in.
