@@ -267,13 +267,16 @@ export const panelDnsQuery = (domain: string) => ({
 /** A connection to a Git host, for private repositories. */
 export type GitSource = {
   id: string
-  type: 'github_app' | 'gitlab'
+  type: 'github_app' | 'gitlab' | 'deploy_key'
   name: string
+  /** Empty for a deploy key: it works with any host. */
   base_url: string
   /** GitHub: the app's page. */
   app_url?: string
   /** GitHub: where accounts and repositories are chosen for the app. */
   install_url?: string
+  /** Deploy key: the line to add to a repository. */
+  public_key?: string
   created_at: string
 }
 

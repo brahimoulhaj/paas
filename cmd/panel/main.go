@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -231,10 +232,13 @@ func serve(ctx context.Context, cfg config.Config) error {
 	// Build limits: the environment gives the defaults, Settings can change them; read at
 	// the start of every build.
 	buildDefaults := store.BuildLimits{CPUs: cfg.BuildCPUs, MemoryMB: cfg.BuildMemoryMB}
-	builds := &builder.Local{LimitsFunc: func(ctx context.Context) (builder.Limits, error) {
-		l, err := st.GetBuildLimits(ctx, buildDefaults)
-		return builder.Limits{CPUs: l.CPUs, MemoryMB: l.MemoryMB}, err
-	}}
+	builds := &builder.Local{
+		LimitsFunc: func(ctx context.Context) (builder.Limits, error) {
+			l, err := st.GetBuildLimits(ctx, buildDefaults)
+			return builder.Limits{CPUs: l.CPUs, MemoryMB: l.MemoryMB}, err
+		},
+		KnownHosts: filepath.Join(cfg.DataDir, "ssh", "known_hosts"),
+	}
 	deployer := deploy.New(ctx, deploy.Options{
 		DataVolume: cfg.DataVolume, MaxBuilds: cfg.MaxBuilds,
 		Store: st, Executor: ex, Router: px, Builder: builds, GitAuth: git, DataDir: cfg.DataDir, Log: log,

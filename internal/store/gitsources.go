@@ -13,6 +13,7 @@ import (
 const (
 	GitTypeGitHubApp = "github_app"
 	GitTypeGitLab    = "gitlab"
+	GitTypeDeployKey = "deploy_key" // an SSH key pair; clones any host over SSH
 )
 
 // GitConnection is a connection to a Git host (a row of git_sources). Secret is

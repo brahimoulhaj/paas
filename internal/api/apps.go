@@ -16,6 +16,7 @@ import (
 
 	"panel/internal/deploy"
 	"panel/internal/executor"
+	"panel/internal/gitsource"
 	"panel/internal/proxy"
 	"panel/internal/store"
 )
@@ -439,8 +440,8 @@ func validApp(w http.ResponseWriter, in store.AppInput) bool {
 		invalid(w, "source_type must be image or git")
 	case !git && (!imageRe.MatchString(in.Image) || strings.Contains(in.Image, "..")):
 		invalid(w, "image must be an image reference like nginx:1.27 or ghcr.io/org/app:tag")
-	case git && !validGitURL(g.Repository):
-		invalid(w, "git_repository must be the https URL of a repository, like https://github.com/org/app.git")
+	case git && !validGitURL(g.Repository) && !gitsource.SSHRepo(g.Repository):
+		invalid(w, "git_repository must be the https URL of a repository, like https://github.com/org/app.git, or its SSH URL with a deploy key")
 	case git && (!branchRe.MatchString(g.Branch) || strings.Contains(g.Branch, "..") ||
 		strings.HasSuffix(g.Branch, "/") || strings.HasSuffix(g.Branch, ".lock")):
 		invalid(w, "git_branch must be a branch name like main or release/2.0")

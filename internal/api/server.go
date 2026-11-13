@@ -90,6 +90,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/git-sources", s.requireAuth(s.withGit(s.handleListGitSources)))
 	mux.HandleFunc("POST /api/git-sources/gitlab", s.requireAuth(s.withGit(s.handleAddGitLab)))
+	mux.HandleFunc("POST /api/git-sources/deploy-key", s.requireAuth(s.withGit(s.handleAddDeployKey)))
 	mux.HandleFunc("POST /api/git-sources/github", s.requireAuth(s.withGit(s.handleStartGitHub)))
 	mux.HandleFunc("GET "+gitsource.CallbackPath, s.requireAuth(s.withGit(s.handleGitHubCallback)))
 	mux.HandleFunc("DELETE /api/git-sources/{id}", s.requireAuth(s.withGit(s.handleDeleteGitSource)))

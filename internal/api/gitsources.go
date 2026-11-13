@@ -22,11 +22,12 @@ type gitSourceJSON struct {
 	BaseURL    string    `json:"base_url"`
 	AppURL     string    `json:"app_url,omitempty"`     // GitHub: the app's page
 	InstallURL string    `json:"install_url,omitempty"` // GitHub: choose accounts and repositories
+	PublicKey  string    `json:"public_key,omitempty"`  // deploy key: add it to the repository
 	CreatedAt  time.Time `json:"created_at"`
 }
 
 func toGitSourceJSON(c gitsource.Connection) gitSourceJSON {
-	return gitSourceJSON{c.ID, c.Type, c.Name, c.BaseURL, c.AppURL, c.InstallURL, c.CreatedAt}
+	return gitSourceJSON{c.ID, c.Type, c.Name, c.BaseURL, c.AppURL, c.InstallURL, c.PublicKey, c.CreatedAt}
 }
 
 // withGit answers 503 when Git connections are not available.
@@ -83,6 +84,23 @@ func (s *Server) handleAddGitLab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.audit(r, "git_source.add", "git_source", c.ID, c.Name, "GitLab "+c.BaseURL)
+	writeJSON(w, http.StatusCreated, toGitSourceJSON(c))
+}
+
+// handleAddDeployKey generates an SSH key pair; the answer carries the public key to add
+// to repositories. The private key never leaves the panel.
+func (s *Server) handleAddDeployKey(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Name string `json:"name"`
+	}
+	if !readJSON(w, r, &in) {
+		return
+	}
+	c, err := s.git.AddDeployKey(r.Context(), in.Name)
+	if s.gitError(w, "add deploy key", err) {
+		return
+	}
+	s.audit(r, "git_source.add", "git_source", c.ID, c.Name, "deploy key")
 	writeJSON(w, http.StatusCreated, toGitSourceJSON(c))
 }
 
@@ -150,7 +168,14 @@ func (s *Server) handleGitSourceBranches(w http.ResponseWriter, r *http.Request)
 // validGitSource checks an app's Git connection: it must exist and the repository must be
 // on its host. It reports whether the app may be saved.
 func (s *Server) validGitSource(w http.ResponseWriter, r *http.Request, in store.AppInput) bool {
-	if in.SourceType != store.SourceGit || in.Git.ConnectionID == "" {
+	if in.SourceType != store.SourceGit {
+		return true
+	}
+	if in.Git.ConnectionID == "" {
+		if gitsource.SSHRepo(in.Git.Repository) {
+			invalid(w, "an SSH repository URL needs a deploy key: choose one as git_source_id, or use the https URL")
+			return false
+		}
 		return true
 	}
 	if s.git == nil {

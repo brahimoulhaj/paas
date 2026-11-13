@@ -8,7 +8,7 @@ import { rich, useT } from '../lib/i18n'
 /** Git connections: a GitHub App or a GitLab token, for private repositories. */
 export function GitConnections() {
   const sources = useQuery(gitSourcesQuery)
-  const [adding, setAdding] = useState<'github' | 'gitlab' | null>(null)
+  const [adding, setAdding] = useState<'github' | 'gitlab' | 'deploy_key' | null>(null)
   // GitHub sends the browser back here; a failed connection arrives with its reason.
   const [callbackError] = useState(() => new URLSearchParams(location.search).get('git_error'))
   const t = useT()
@@ -25,6 +25,9 @@ export function GitConnections() {
             <Button variant="ghost" className="h-7 px-2 text-xs" onClick={() => setAdding('gitlab')}>
               {t.settingsGit.connectGitLab}
             </Button>
+            <Button variant="ghost" className="h-7 px-2 text-xs" onClick={() => setAdding('deploy_key')}>
+              {t.settingsGit.addDeployKey}
+            </Button>
           </span>
         )
       }
@@ -36,6 +39,7 @@ export function GitConnections() {
       )}
       {adding === 'github' && <ConnectGitHub onCancel={() => setAdding(null)} />}
       {adding === 'gitlab' && <ConnectGitLab onDone={() => setAdding(null)} />}
+      {adding === 'deploy_key' && <AddDeployKey onDone={() => setAdding(null)} />}
       {!sources.data && (
         <div className="p-4">
           <QueryState loading={sources.isPending} error={sources.error} what={t.settingsGit.what} />
@@ -185,22 +189,99 @@ function ConnectGitLab({ onDone }: { onDone: () => void }) {
   )
 }
 
+/** A new deploy key: only a name; the key pair is made by the panel. */
+function AddDeployKey({ onDone }: { onDone: () => void }) {
+  const queryClient = useQueryClient()
+  const t = useT()
+  const [name, setName] = useState('')
+  const add = useMutation({
+    mutationFn: () => api<GitSource>('/git-sources/deploy-key', { method: 'POST', body: { name } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: gitSourcesQuery.queryKey })
+      onDone()
+    },
+  })
+  function submit(e: FormEvent) {
+    e.preventDefault()
+    add.mutate()
+  }
+  return (
+    <form onSubmit={submit} className="space-y-3 border-b border-line bg-raised p-4">
+      <p className="text-sm">{t.settingsGit.addDeployKey}</p>
+      <p className="text-xs text-muted">{t.settingsGit.deployKeyIntro}</p>
+      <div className="max-w-sm">
+        <Field
+          label={t.settingsGit.deployKeyName}
+          name="deploy-key-name"
+          placeholder="shop-api"
+          maxLength={64}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          autoComplete="off"
+        />
+      </div>
+      {add.error && <ErrorNote>{add.error.message}</ErrorNote>}
+      <div className="flex gap-2">
+        <Button type="submit" disabled={add.isPending}>
+          {add.isPending ? t.settingsGit.creating : t.settingsGit.create}
+        </Button>
+        <Button type="button" variant="ghost" onClick={onDone}>
+          {t.common.cancel}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+/** A deploy key's public half, to copy into a repository's settings. */
+function PublicKey({ value }: { value: string }) {
+  const t = useT()
+  const [copied, setCopied] = useState(false)
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopied(true)
+    } catch {
+      setCopied(false)
+    }
+  }
+  return (
+    <div className="mt-2 space-y-1.5">
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          readOnly
+          value={value}
+          aria-label={t.settingsGit.publicKey}
+          dir="ltr"
+          onFocus={(e) => e.target.select()}
+          className="block h-8 min-w-0 flex-1 border border-line bg-bg px-2 font-mono text-xs text-fg focus:border-accent focus:outline-none"
+        />
+        <Button type="button" variant="ghost" className="h-8 px-3 text-xs" onClick={copy}>
+          {copied ? t.common.copied : t.common.copy}
+        </Button>
+      </div>
+      <p className="text-xs text-muted">{t.settingsGit.deployKeyWhere}</p>
+    </div>
+  )
+}
+
 function SourceRow({ source }: { source: GitSource }) {
   const queryClient = useQueryClient()
   const t = useT()
   const github = source.type === 'github_app'
+  const deployKey = source.type === 'deploy_key'
   const remove = useMutation({
     mutationFn: () => api<void>(`/git-sources/${source.id}`, { method: 'DELETE' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: gitSourcesQuery.queryKey }),
   })
   return (
     <li className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-4 py-3">
-      <div className="min-w-0">
+      <div className={deployKey ? 'min-w-0 flex-1' : 'min-w-0'}>
         <p className="flex items-center gap-2 truncate text-sm">
-          {source.name} <Badge tone="muted">{github ? 'GitHub App' : 'GitLab'}</Badge>
+          {source.name} <Badge tone="muted">{github ? 'GitHub App' : deployKey ? t.settingsGit.deployKeyBadge : 'GitLab'}</Badge>
         </p>
         <p className="text-xs text-muted">
-          <span dir="ltr">{source.base_url.replace(/^https:\/\//, '')}</span> ·{' '}
+          {deployKey ? t.settingsGit.anyHost : <span dir="ltr">{source.base_url.replace(/^https:\/\//, '')}</span>} ·{' '}
           <span title={dateTime(source.created_at)}>{t.settingsGit.connected(timeAgo(source.created_at))}</span>
         </p>
         {github && (
@@ -217,6 +298,7 @@ function SourceRow({ source }: { source: GitSource }) {
             )}
           </p>
         )}
+        {deployKey && source.public_key && <PublicKey value={source.public_key} />}
         {remove.error && <p className="text-xs text-danger">{remove.error.message}</p>}
         {github && remove.isIdle && (
           <p className="mt-1 text-xs text-muted">{t.settingsGit.removeNote}</p>

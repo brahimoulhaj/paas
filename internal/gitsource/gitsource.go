@@ -1,6 +1,7 @@
 // Package gitsource connects the panel to Git hosts so it can list and fetch private
 // repositories: GitHub through a GitHub App created from the panel (the manifest flow),
-// GitLab through an access token. Secrets are stored encrypted in git_sources.
+// GitLab through an access token, any host over SSH through a deploy key the panel
+// generates. Secrets are stored encrypted in git_sources.
 package gitsource
 
 import (
@@ -43,6 +44,7 @@ type Connection struct {
 	BaseURL    string
 	AppURL     string // GitHub: the app's settings page
 	InstallURL string // GitHub: where the app is installed on accounts and repositories
+	PublicKey  string // deploy key: the line to add to a repository
 	CreatedAt  time.Time
 }
 
@@ -66,6 +68,8 @@ type creds struct {
 	PrivateKey    string `json:"private_key,omitempty"` // PEM
 	// GitLab
 	Token string `json:"token,omitempty"`
+	// Deploy key (PrivateKey above holds its private half)
+	PublicKey string `json:"public_key,omitempty"`
 }
 
 type Service struct {
@@ -136,9 +140,12 @@ func (s *Service) save(ctx context.Context, typ, name, baseURL string, c creds) 
 
 func (s *Service) public(row store.GitConnection, c creds) Connection {
 	out := Connection{ID: row.ID, Type: row.Type, Name: row.Name, BaseURL: row.BaseURL, CreatedAt: row.CreatedAt}
-	if row.Type == store.GitTypeGitHubApp {
+	switch row.Type {
+	case store.GitTypeGitHubApp:
 		out.AppURL = c.HTMLURL
 		out.InstallURL = s.installURL(c.Slug)
+	case store.GitTypeDeployKey:
+		out.PublicKey = c.PublicKey
 	}
 	return out
 }
@@ -183,6 +190,12 @@ func (s *Service) Credentials(ctx context.Context, id, repository string) (build
 	if err != nil {
 		return builder.Auth{}, err
 	}
+	if row.Type == store.GitTypeDeployKey {
+		if !SSHRepo(repository) {
+			return builder.Auth{}, errors.New("a deploy key clones over SSH: the repository must be an SSH URL like git@github.com:org/app.git")
+		}
+		return builder.Auth{SSHKey: c.PrivateKey}, nil
+	}
 	fullName, err := repoOnHost(row.BaseURL, repository)
 	if err != nil {
 		return builder.Auth{}, err
@@ -210,6 +223,12 @@ func (s *Service) CheckRepository(ctx context.Context, id, repository string) er
 	if err != nil {
 		return err
 	}
+	if row.Type == store.GitTypeDeployKey {
+		if !SSHRepo(repository) {
+			return invalidf("with a deploy key, git_repository must be an SSH URL like git@github.com:org/app.git")
+		}
+		return nil
+	}
 	if _, err := repoOnHost(row.BaseURL, repository); err != nil {
 		return invalidf("%s", err.Error())
 	}
@@ -228,6 +247,8 @@ func (s *Service) Repos(ctx context.Context, id, query string) ([]Repo, error) {
 		repos, err = s.gitlabRepos(ctx, row.BaseURL, c.Token, query)
 	case store.GitTypeGitHubApp:
 		repos, err = s.githubRepos(ctx, row.ID, c)
+	case store.GitTypeDeployKey:
+		return nil, invalidf("a deploy key cannot list repositories; type the repository's SSH URL")
 	default:
 		err = fmt.Errorf("unknown git connection type %q", row.Type)
 	}
@@ -259,6 +280,8 @@ func (s *Service) Branches(ctx context.Context, id, fullName string) ([]string, 
 		return s.gitlabBranches(ctx, row.BaseURL, c.Token, fullName)
 	case store.GitTypeGitHubApp:
 		return s.githubBranches(ctx, row.ID, c, fullName)
+	case store.GitTypeDeployKey:
+		return nil, invalidf("a deploy key cannot list branches; type the branch name")
 	}
 	return nil, fmt.Errorf("unknown git connection type %q", row.Type)
 }

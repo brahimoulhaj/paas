@@ -36,7 +36,12 @@ export function duration(from: string | null, to: string | null): string {
 
 /** "github.com/org/app" from "https://github.com/org/app.git". */
 export function repoName(url: string): string {
-  return url.replace(/^https:\/\//, '').replace(/\.git$/, '').replace(/\/$/, '')
+  return url
+    .replace(/^https:\/\//, '')
+    .replace(/^ssh:\/\/[^@/]+@/, '') // ssh://git@host:2222/org/app.git → host:2222/org/app
+    .replace(/^[^@/:]+@([^:/]+):/, '$1/') // git@host:org/app.git → host/org/app
+    .replace(/\.git$/, '')
+    .replace(/\/$/, '')
 }
 
 /** Where an app comes from, in one line: its image, or its repository and branch. */

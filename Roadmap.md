@@ -9,7 +9,7 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build (Railpack and GitLab work on the VPS, 2026-11-13; a single-module Gradle app needs a start command); try build caps (Settings → Builds) and a panel update during a deploy (it should resume). Then the build log stream on the deployment page, deploy keys, private registries. Time a fresh install.
+**Next up:** M2 — on the VPS (v0.4.0+): deploy a Railpack app (no Dockerfile) and cancel a build (Railpack and GitLab work on the VPS, 2026-11-13; a single-module Gradle app needs a start command); try build caps (Settings → Builds), a panel update during a deploy (it should resume) and a deploy key on a GitHub repository. Then private registries. Time a fresh install.
 
 ---
 
@@ -159,7 +159,7 @@ Goal: push-to-deploy from a repository with any of the builders.
 ### Git sources
 - [~] Migration: `git_sources`, `registries`, `env_vars` — `0003_git_source.sql` adds the Git columns to `apps` and `commit_sha` to `deployments`; `0004_git_sources.sql` adds `git_sources` (secrets encrypted) and `apps.git_source_id`; `0005_app_environment.sql` keeps env vars as a JSON column on `apps`; `registries` comes with its feature
 - [x] Public Git URL — app `source_type = git` with an https repository and a branch (`/api/projects/{id}/apps`, `PATCH /api/apps/{id}`; URL, branch and path validation tested in `internal/api/apps_test.go`); create-app flow and settings offer Image or Git repository; deployed end to end on a real VPS (2026-11-13)
-- [ ] Private repo by deploy key (generate key pair, show public key)
+- [x] Private repo by deploy key (generate key pair, show public key) — Settings → Git connections → Add deploy key (`POST /api/git-sources/deploy-key`): an ed25519 key pair, private half encrypted with the panel key, public half shown with Copy and where to paste it on GitHub, GitLab and Gitea; apps using it give an SSH URL (`git@host:org/app.git` or `ssh://git@host:port/…`), validated against option injection (`TestSSHRepo`). The clone runs over SSH only, with the key in a private temp folder, no user config or agent, and the host key trusted on first use and pinned in `<data dir>/ssh/known_hosts`; a changed host key or a key the server refuses gives a clear error. `openssh-client` added to the images. `TestFetchOverSSH` clones from a throwaway sshd in Docker (wrong key and changed host key refused); `TestDeployKey`, API test. Not yet tried against GitHub itself
 - [x] GitHub App (first provider) — created from Settings with GitHub's manifest flow (`POST /api/git-sources/github`, callback `/api/git-sources/github/callback`), read-only on code and metadata; app JWT and cached installation tokens; `internal/gitsource` tested against a fake GitHub; created, installed and used to deploy a private repository on a real VPS (2026-11-13). Webhooks come with M3
 - [~] GitLab token — gitlab.com or self-hosted over https, token checked when added (`POST /api/git-sources/gitlab`); tested against a fake GitLab; not yet tried against GitLab itself
 - [ ] Gitea token

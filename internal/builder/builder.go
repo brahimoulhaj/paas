@@ -66,6 +66,10 @@ type Local struct {
 	LimitsFunc func(context.Context) (Limits, error)
 	// BuildKitImage overrides the capped builder's image; empty = BuildKitImage.
 	BuildKitImage string
+	// KnownHosts is the known_hosts file of clones over SSH: a host's key is trusted the
+	// first time and must match afterwards. Empty = ssh/known_hosts in the data dir, read
+	// as the parent of the builds folder.
+	KnownHosts string
 
 	mu    sync.Mutex
 	ready string         // name of the capped builder known to exist
@@ -224,24 +228,52 @@ var shaRe = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 type Auth struct {
 	Username string
 	Password string // an access token
+	SSHKey   string // a deploy key (OpenSSH private key): the clone goes over SSH
 }
 
 // Fetch clones the tip of src.Branch into dir (which must not exist yet) and returns the
-// commit it checked out. Only the one commit is downloaded.
+// commit it checked out. Only the one commit is downloaded. With a deploy key in auth the
+// clone goes over SSH, otherwise over https.
 func (l *Local) Fetch(ctx context.Context, src store.GitSource, auth Auth, dir string, line LineFunc) (string, error) {
 	// No prompt for credentials (a private repository fails at once instead of hanging),
 	// no credential helper from the host, and only the transport the URL was validated for.
+	transport := "https"
+	if auth.SSHKey != "" {
+		transport = "ssh"
+	}
 	args := []string{
 		"-c", "credential.helper=",
-		"-c", "protocol.allow=never", "-c", "protocol.https.allow=always",
+		"-c", "protocol.allow=never", "-c", "protocol." + transport + ".allow=always",
 		"clone", "--depth", "1", "--single-branch", "--no-tags", "--branch", src.Branch,
 		"--", src.Repository, dir,
 	}
-	env, err := gitEnv(src.Repository, auth)
+	var env []string
+	var err error
+	if auth.SSHKey != "" {
+		var cleanup func()
+		env, cleanup, err = l.sshEnv(src.Repository, auth.SSHKey, dir)
+		if cleanup != nil {
+			defer cleanup()
+		}
+	} else {
+		env, err = gitEnv(src.Repository, auth)
+	}
 	if err != nil {
 		return "", err
 	}
-	if err := run(ctx, line, env, l.git(), args...); err != nil {
+	var seen []string
+	collect := func(s string) {
+		if len(seen) < 200 {
+			seen = append(seen, s)
+		}
+		if line != nil {
+			line(s)
+		}
+	}
+	if err := run(ctx, collect, env, l.git(), args...); err != nil {
+		if hint := sshHint(seen); auth.SSHKey != "" && hint != "" && ctx.Err() == nil {
+			return "", fmt.Errorf("git clone: %s", hint)
+		}
 		return "", fmt.Errorf("git clone: %w", err)
 	}
 	out, err := exec.CommandContext(ctx, l.git(), "-C", dir, "rev-parse", "HEAD").Output()
@@ -253,6 +285,71 @@ func (l *Local) Fetch(ctx context.Context, src store.GitSource, auth Auth, dir s
 		return "", fmt.Errorf("git rev-parse: unexpected output %q", sha)
 	}
 	return sha, nil
+}
+
+// sshHint explains the usual ways a clone over SSH fails, from ssh's and git's output.
+// Git ends with a generic "make sure you have the correct access rights" whatever happened.
+func sshHint(lines []string) string {
+	all := strings.Join(lines, "\n")
+	switch {
+	case strings.Contains(all, "REMOTE HOST IDENTIFICATION HAS CHANGED") || strings.Contains(all, "Host key verification failed"):
+		return "host key verification failed: the server's SSH host key changed since the first clone. " +
+			"If that is expected, remove its line from ssh/known_hosts in the panel's data folder"
+	case strings.Contains(all, "Permission denied (publickey"):
+		return "the Git server refused the deploy key: add its public key to the repository (read access is enough)"
+	case strings.Contains(all, "Could not resolve hostname"):
+		return "could not resolve host: check the host name in the repository's SSH URL"
+	case strings.Contains(all, "Connection refused") || strings.Contains(all, "Connection timed out") || strings.Contains(all, "Operation timed out"):
+		return "could not reach the Git server over SSH (connection refused or timed out)"
+	}
+	for _, l := range lines {
+		if strings.HasPrefix(l, "fatal: ") || strings.HasPrefix(l, "ERROR: ") {
+			return strings.TrimSpace(l)
+		}
+	}
+	return ""
+}
+
+// sshEnv is the environment of a clone over SSH with a deploy key. The key is written to a
+// private folder next to the workspace (never inside the repository) and removed by
+// cleanup. ssh reads no user or host configuration and no agent, never prompts, and
+// trusts a host key the first time it sees it (kept in KnownHosts), refusing a changed one.
+func (l *Local) sshEnv(repository, key, dir string) ([]string, func(), error) {
+	if strings.HasPrefix(repository, "https://") || strings.HasPrefix(repository, "http://") {
+		return nil, nil, errors.New("a deploy key clones over SSH: use the repository's SSH URL, like git@github.com:org/app.git")
+	}
+	knownHosts := l.KnownHosts
+	if knownHosts == "" {
+		knownHosts = filepath.Join(filepath.Dir(filepath.Dir(dir)), "ssh", "known_hosts")
+	}
+	for _, d := range []string{filepath.Dir(knownHosts), filepath.Dir(dir)} {
+		if err := os.MkdirAll(d, 0o700); err != nil {
+			return nil, nil, err
+		}
+	}
+	keyDir, err := os.MkdirTemp(filepath.Dir(dir), filepath.Base(dir)+"-key-")
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() { _ = os.RemoveAll(keyDir) }
+	keyFile := filepath.Join(keyDir, "id")
+	if !strings.HasSuffix(key, "\n") {
+		key += "\n"
+	}
+	if err := os.WriteFile(keyFile, []byte(key), 0o600); err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	for _, p := range []string{keyFile, knownHosts} {
+		if strings.ContainsAny(p, "'\"\\ \t\n") {
+			cleanup()
+			return nil, nil, fmt.Errorf("unsupported characters in the path %q", p)
+		}
+	}
+	command := "ssh -F /dev/null -i " + keyFile + " -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes" +
+		" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=" + knownHosts + " -o ConnectTimeout=20"
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=", "SSH_ASKPASS=", "GIT_SSH_COMMAND="+command, "GIT_SSH_VARIANT=ssh")
+	return env, cleanup, nil
 }
 
 // gitEnv is the environment of a clone. The credential travels as configuration in the

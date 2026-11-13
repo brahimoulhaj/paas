@@ -51,7 +51,8 @@ export function sourceChanged(f: SourceForm, app: App): boolean {
   return JSON.stringify(sourceInput(sourceForm(app))) !== JSON.stringify(sourceInput(f))
 }
 
-const sourceLabel = (s: GitSource) => `${s.type === 'github_app' ? 'GitHub' : 'GitLab'} · ${s.name}`
+const sourceKind = { github_app: 'GitHub', gitlab: 'GitLab', deploy_key: 'SSH' } as const
+const sourceLabel = (s: GitSource) => `${sourceKind[s.type]} · ${s.name}`
 
 /** Image or Git repository, and the fields of the chosen one. */
 export function SourceFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceForm) => void }) {
@@ -103,6 +104,8 @@ function GitFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceF
   const t = useT()
   const sources = useQuery(gitSourcesQuery)
   const connected = form.git_source_id !== ''
+  // A deploy key lists nothing: the repository is typed as an SSH URL.
+  const deployKey = sources.data?.find((x) => x.id === form.git_source_id)?.type === 'deploy_key'
   const accessOptions: ComboOption[] = [
     { value: '', label: t.source.publicByUrl },
     ...(sources.data ?? []).map((x) => ({ value: x.id, label: sourceLabel(x) })),
@@ -130,7 +133,25 @@ function GitFields({ form, onChange }: { form: SourceForm; onChange: (f: SourceF
         })}
       />
 
-      {connected ? (
+      {deployKey ? (
+        <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">
+          <Field
+            label={t.source.sshUrl}
+            name="git_repository"
+            required
+            dir="ltr"
+            pattern="(ssh://)?[A-Za-z0-9._\-]+@.+"
+            placeholder="git@github.com:org/app.git"
+            hintTooltip
+            hint={t.source.sshUrlHint}
+            value={form.git_repository}
+            onChange={set('git_repository')}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <Field label={t.source.branch} name="git_branch" required dir="ltr" placeholder="main" value={form.git_branch} onChange={set('git_branch')} />
+        </div>
+      ) : connected ? (
         <ConnectedRepo form={form} onChange={onChange} />
       ) : (
         <div className="grid gap-4 sm:grid-cols-[2fr_1fr]">

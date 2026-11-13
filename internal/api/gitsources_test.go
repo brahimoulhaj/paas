@@ -57,4 +57,25 @@ func TestGitSourcesAPI(t *testing.T) {
 	e.must(422, "POST", "/api/projects/"+pid+"/apps", map[string]any{
 		"name": "api", "source_type": "git", "git_repository": "https://github.com/org/api.git", "port": 80, "git_source_id": "nope",
 	})
+
+	// Deploy keys: the answer carries the public key, never the private one; SSH URLs need one.
+	key := e.must(201, "POST", "/api/git-sources/deploy-key", map[string]any{"name": "api repo"})
+	if !strings.HasPrefix(key["public_key"].(string), "ssh-ed25519 ") || key["type"] != "deploy_key" {
+		t.Fatalf("deploy key = %v", key)
+	}
+	for _, v := range key {
+		if s, ok := v.(string); ok && strings.Contains(s, "PRIVATE") {
+			t.Fatalf("private key in the answer: %v", key)
+		}
+	}
+	ssh := map[string]any{"name": "api", "source_type": "git", "git_repository": "git@github.com:org/api.git", "git_branch": "main", "port": 80}
+	e.must(422, "POST", "/api/projects/"+pid+"/apps", ssh) // no deploy key
+	ssh["git_source_id"] = key["id"]
+	app := e.must(201, "POST", "/api/projects/"+pid+"/apps", ssh)
+	if app["git_repository"] != "git@github.com:org/api.git" || app["git_source_id"] != key["id"] {
+		t.Errorf("app = %v", app)
+	}
+	ssh["name"], ssh["git_repository"] = "web", "https://github.com/org/web.git" // https with a deploy key
+	e.must(422, "POST", "/api/projects/"+pid+"/apps", ssh)
+	e.must(409, "DELETE", "/api/git-sources/"+key["id"].(string), nil) // still used
 }

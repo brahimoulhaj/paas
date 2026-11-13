@@ -2,7 +2,11 @@ package builder
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/pem"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ssh"
 
 	"panel/internal/store"
 )
@@ -428,5 +434,115 @@ func TestBuildMemoryCapEnforced(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(lines, "\n"), "cannot allocate memory") && !strings.Contains(strings.Join(lines, "\n"), "Killed") {
 		t.Errorf("not killed by the cap: %v\n%s", err, strings.Join(lines, "\n"))
+	}
+}
+
+// TestFetchOverSSH clones with a deploy key from a throwaway SSH Git server in Docker: the
+// host key is trusted the first time and pinned, a changed one is refused, and the key
+// file does not outlive the clone. Needs Docker and network (apk) the first time.
+func TestFetchOverSSH(t *testing.T) {
+	if testing.Short() {
+		t.Skip("needs a Docker daemon")
+	}
+	if err := exec.Command("docker", "version").Run(); err != nil {
+		t.Skip("no Docker daemon")
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sshPub, _ := ssh.NewPublicKey(pub)
+	authorized := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(sshPub)))
+
+	script := `set -e
+apk add --no-cache openssh git >/dev/null
+ssh-keygen -A >/dev/null
+adduser -D -s /bin/sh git && sed -i 's/^git:!/git:*/' /etc/shadow
+mkdir -p /home/git/.ssh && echo "$KEY" > /home/git/.ssh/authorized_keys
+chown -R git /home/git && chmod 700 /home/git/.ssh && chmod 600 /home/git/.ssh/authorized_keys
+su git -c 'git init -q --bare /home/git/app.git && git init -q /tmp/w && cd /tmp/w && git config user.email t@t && git config user.name t && echo hi > f && git add f && git commit -qm init && git push -q /home/git/app.git HEAD:main'
+exec /usr/sbin/sshd -D -e`
+	out, err := exec.Command("docker", "run", "-d", "--rm", "-p", "127.0.0.1::22", "-e", "KEY="+authorized, "alpine:3.22", "sh", "-c", script).Output()
+	if err != nil {
+		t.Fatalf("start ssh server: %v", err)
+	}
+	id := strings.TrimSpace(string(out))
+	t.Cleanup(func() { exec.Command("docker", "rm", "-f", id).Run() })
+	portOut, err := exec.Command("docker", "port", id, "22/tcp").Output()
+	if err != nil {
+		t.Fatalf("docker port: %v", err)
+	}
+	addr := strings.TrimSpace(strings.Split(string(portOut), "\n")[0])
+	_, port, _ := strings.Cut(addr, ":")
+
+	// Wait for sshd: it starts after apk has installed it.
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		c, err := net.DialTimeout("tcp", addr, time.Second)
+		if err == nil {
+			c.SetReadDeadline(time.Now().Add(2 * time.Second))
+			banner := make([]byte, 4)
+			n, _ := c.Read(banner)
+			c.Close()
+			if string(banner[:n]) == "SSH-" {
+				break
+			}
+		}
+		if time.Now().After(deadline) {
+			logs, _ := exec.Command("docker", "logs", id).CombinedOutput()
+			t.Fatalf("ssh server did not start:\n%s", logs)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	parent, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownHosts := filepath.Join(parent, "ssh", "known_hosts")
+	b := &Local{KnownHosts: knownHosts}
+	src := store.GitSource{Repository: "ssh://git@127.0.0.1:" + port + "/home/git/app.git", Branch: "main"}
+	auth := Auth{SSHKey: string(pem.EncodeToMemory(block))}
+	var lines []string
+	sha, err := b.Fetch(context.Background(), src, auth, filepath.Join(parent, "builds", "d1"), func(l string) { lines = append(lines, l) })
+	if err != nil || !shaRe.MatchString(sha) {
+		t.Fatalf("fetch = %q, %v\n%s", sha, err, strings.Join(lines, "\n"))
+	}
+	if raw, err := os.ReadFile(filepath.Join(parent, "builds", "d1", "f")); err != nil || string(raw) != "hi\n" {
+		t.Errorf("cloned file = %q, %v", raw, err)
+	}
+	if kh, _ := os.ReadFile(knownHosts); !strings.Contains(string(kh), "[127.0.0.1]:"+port) {
+		t.Errorf("host key not pinned: %q", kh)
+	}
+	if left, _ := filepath.Glob(filepath.Join(parent, "builds", "d1-key-*")); len(left) != 0 {
+		t.Errorf("key folder left behind: %v", left)
+	}
+
+	// The wrong key is refused.
+	_, other, _ := ed25519.GenerateKey(rand.Reader)
+	otherBlock, _ := ssh.MarshalPrivateKey(other, "")
+	if _, err := b.Fetch(context.Background(), src, Auth{SSHKey: string(pem.EncodeToMemory(otherBlock))}, filepath.Join(parent, "builds", "d2"), nil); err == nil ||
+		!strings.Contains(err.Error(), "refused the deploy key") {
+		t.Errorf("clone with an unknown key: %v", err)
+	}
+
+	// A host key that changed since it was pinned is refused.
+	fake, _, _ := ed25519.GenerateKey(rand.Reader)
+	fakePub, _ := ssh.NewPublicKey(fake)
+	if err := os.WriteFile(knownHosts, []byte("[127.0.0.1]:"+port+" "+strings.TrimSpace(string(ssh.MarshalAuthorizedKey(fakePub)))+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = b.Fetch(context.Background(), src, auth, filepath.Join(parent, "builds", "d3"), nil)
+	if err == nil || !strings.Contains(err.Error(), "verification failed") {
+		t.Errorf("changed host key: %v", err)
+	}
+
+	// An https URL with a deploy key is refused before anything runs.
+	if _, err := b.Fetch(context.Background(), store.GitSource{Repository: "https://example.com/a.git", Branch: "main"}, auth, filepath.Join(parent, "builds", "d4"), nil); err == nil {
+		t.Error("https URL with a deploy key was accepted")
 	}
 }

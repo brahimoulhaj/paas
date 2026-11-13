@@ -26,8 +26,8 @@ RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/panel ./cmd/panel
 
 FROM alpine:3.22
-# git fetches Git apps; the docker CLI with buildx builds them on the mounted daemon.
-RUN apk add --no-cache ca-certificates tzdata git docker-cli docker-cli-buildx
+# git fetches Git apps (ssh for deploy keys); the docker CLI with buildx builds them on the mounted daemon.
+RUN apk add --no-cache ca-certificates tzdata git openssh-client docker-cli docker-cli-buildx
 # Railpack builds Git apps that have no Dockerfile. Pinned and checksummed; keep the
 # version equal to builder.RailpackVersion (its BuildKit frontend must match).
 ARG RAILPACK_VERSION=0.43.0
