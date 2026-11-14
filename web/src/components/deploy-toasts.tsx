@@ -12,6 +12,8 @@ import { takeUpdated } from '../lib/toasts'
 // Browsers hold audio until the first click or key press on the page.
 toast.configure({ sound: true, volume: 0.5 })
 
+type ToastAction = NonNullable<NonNullable<Parameters<typeof toast.loading>[1]>['action']>
+
 /**
  * Toasts for deployments on any app, wherever the user is in the panel: one when a deployment
  * starts or is queued, which turns into success or failure when it ends. It follows the same
@@ -34,12 +36,19 @@ export function DeployToasts() {
 
   useEffect(() => {
     if (!active.data) return
-    const view = (d: ActiveDeployment) => ({
-      label: t.overview.viewDeployment,
-      onClick: () => {
-        navigate({ to: '/projects/$projectId/apps/$appId', params: { projectId: d.project_id, appId: d.app_id }, search: { tab: 'deployments' } })
-      },
-    })
+    // View opens the app's deployments. While the deployment is still in progress the toast
+    // stays (a returned patch keeps it, naming the button again so it survives); once it has
+    // finished, View closes it.
+    const view = (d: ActiveDeployment): ToastAction => {
+      const action: ToastAction = {
+        label: t.overview.viewDeployment,
+        onClick: () => {
+          navigate({ to: '/projects/$projectId/apps/$appId', params: { projectId: d.project_id, appId: d.app_id }, search: { tab: 'deployments' } })
+          return seen.current.has(d.id) ? { action } : undefined
+        },
+      }
+      return action
+    }
     const now = new Set(active.data.map((d) => d.id))
 
     for (const d of active.data) {
