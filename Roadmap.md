@@ -247,7 +247,7 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 
 ### UI
 - [x] Health check settings — app Settings → Health check: type, path, expected status, start period, interval, timeout, failures in a row; checked in a browser (2026-11-14)
-- [x] Deployment timeline with per-state timing — above the log of the selected deployment: one bar per step on a shared scale, with its duration, the running step live, the step it failed or was cancelled in marked; the list shows a running deployment's step. Deployments from before have none ("No steps recorded")
+- [x] Deployment timeline with per-state timing — above the log of the selected deployment: one bar per step on a shared scale, with its duration, the running step live, the step it failed or was cancelled in marked; the list shows a running deployment's step. Deployments from before have none ("No steps recorded"). The Deployments tab is an accordion: each row opens its actions, timeline and log in place, the latest open by default; 10 a page with Newer / Older (`?page`, `?per_page`, `X-Total-Count`; `TestListDeploymentsPaged`)
 - [x] Rollback picker — select a deployment in the Deployments tab, "Roll back to this" with a confirmation in its log panel; rollbacks are marked ↩ in the list and get the usual deploy toasts
 - [x] Webhook and auto-deploy settings — Deploy webhook panel in the app's Settings: URL with Copy, how to add it on GitHub, GitLab and Gitea (or a curl line for image apps), a warning when the panel is reached on a local address
 - [ ] Certificates page

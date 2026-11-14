@@ -126,8 +126,23 @@ func (s *Store) GetDeployment(ctx context.Context, deploymentID string) (Deploym
 
 // ListDeployments returns the newest first.
 func (s *Store) ListDeployments(ctx context.Context, appID string, limit int) ([]Deployment, error) {
+	return s.listDeployments(ctx, appID, limit, 0)
+}
+
+// ListDeploymentsPage returns one page of an app's deployments, newest first, skipping
+// offset, and how many the app has in all.
+func (s *Store) ListDeploymentsPage(ctx context.Context, appID string, limit, offset int) ([]Deployment, int, error) {
+	var total int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM deployments WHERE app_id = ?`, appID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	list, err := s.listDeployments(ctx, appID, limit, offset)
+	return list, total, err
+}
+
+func (s *Store) listDeployments(ctx context.Context, appID string, limit, offset int) ([]Deployment, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+deploymentCols+` FROM deployments WHERE app_id = ? ORDER BY id DESC LIMIT ?`, appID, limit)
+		`SELECT `+deploymentCols+` FROM deployments WHERE app_id = ? ORDER BY id DESC LIMIT ? OFFSET ?`, appID, limit, offset)
 	if err != nil {
 		return nil, err
 	}

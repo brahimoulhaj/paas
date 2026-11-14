@@ -1,6 +1,6 @@
 import { MountSettings } from '../components/mounts'
 import { EnvironmentSettings } from '../components/environment'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DnsHintText } from '../components/dns'
@@ -10,9 +10,12 @@ import { HealthCheckPanel } from '../components/health-check'
 import { LogViewer } from '../components/logviewer'
 import { Badge, Button, ConfirmButton, cx, Empty, ErrorNote, Field, HelpTip, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
 import {
+  addDeployment,
   api,
   appQuery,
   appsQuery,
+  deploymentsKey,
+  deploymentsPerPage,
   deploymentsQuery,
   dnsQuery,
   domainsQuery,
@@ -22,6 +25,7 @@ import {
   type AppInput,
   type Deployment,
   type Domain,
+  type Page,
 } from '../lib/api'
 import { SourceFields, sourceChanged, sourceForm, sourceInput } from '../components/source'
 import { rich, useT } from '../lib/i18n'
@@ -45,9 +49,9 @@ export function AppPage() {
   const primaryDomain = domains.data?.find((d) => d.is_primary)
   const deployments = useQuery({
     ...deploymentsQuery(appId),
-    refetchInterval: (q) => (q.state.data?.some(isActive) ? 1500 : false),
+    refetchInterval: (q) => (q.state.data?.items.some(isActive) ? 1500 : false),
   })
-  const latest = deployments.data?.[0]
+  const latest = deployments.data?.items[0]
   const deploying = !!latest && isActive(latest)
   const app = useQuery({ ...appQuery(appId), refetchInterval: deploying ? 2000 : 10_000 })
 
@@ -56,7 +60,9 @@ export function AppPage() {
     queryClient.invalidateQueries({ queryKey: appQuery(appId).queryKey, exact: true })
   }, [latest?.id, latest?.status, appId, queryClient])
 
-  const [selected, setSelected] = useState<string | null>(null)
+  // The deployment opened in the list: undefined = the latest (it follows new ones), null = none.
+  const [selected, setSelected] = useState<string | null | undefined>(undefined)
+  const [page, setPage] = useState(1)
   const [terminalAppId, setTerminalAppId] = useState<string | null>(null)
   useEffect(() => {
     if (tab === 'terminal') setTerminalAppId(appId)
@@ -68,8 +74,9 @@ export function AppPage() {
   const deploy = useMutation({
     mutationFn: () => api<Deployment>(`/apps/${appId}/deploy`, { method: 'POST' }),
     onSuccess: (d) => {
-      queryClient.setQueryData<Deployment[]>(deploymentsQuery(appId).queryKey, (old) => [d, ...(old ?? [])])
-      setSelected(d.id)
+      queryClient.setQueryData(deploymentsQuery(appId).queryKey, addDeployment(d))
+      setSelected(undefined)
+      setPage(1)
       goto('deployments')
     },
   })
@@ -180,12 +187,17 @@ export function AppPage() {
       {tab === 'overview' && <Overview app={a} latest={latest} onOpenDeployments={() => goto('deployments')} />}
       {tab === 'deployments' && (
         <Deployments
-          list={deployments.data}
-          loading={deployments.isPending}
-          error={deployments.error}
+          appId={a.id}
+          first={deployments}
+          page={page}
+          onPage={setPage}
           currentId={a.current_deployment_id}
-          selected={selected ?? latest?.id ?? null}
-          onSelect={setSelected}
+          open={selected === undefined ? (latest?.id ?? null) : selected}
+          onOpen={setSelected}
+          onRolledBack={(id) => {
+            setPage(1)
+            setSelected(id)
+          }}
           git={a.source_type === 'git'}
         />
       )}
@@ -208,8 +220,11 @@ export function AppPage() {
 function Overview({ app, latest, onOpenDeployments }: { app: App; latest?: Deployment; onOpenDeployments: () => void }) {
   const t = useT()
   const domains = useQuery(domainsQuery(app.id))
-  const deployments = useQuery(deploymentsQuery(app.id))
-  const current = deployments.data?.find((d) => d.id === app.current_deployment_id)
+  const current = useQuery({
+    queryKey: ['deployments', app.current_deployment_id] as const,
+    queryFn: () => api<Deployment>(`/deployments/${app.current_deployment_id}`),
+    enabled: !!app.current_deployment_id,
+  }).data
   // A Git deployment does not record the settings it was built with; only the port is compared.
   const pending = current && ((app.source_type === 'image' && current.image !== app.image) || current.port !== app.port)
 
@@ -346,35 +361,51 @@ const deployTone: Record<Deployment['status'], Tone> = {
 }
 
 function Deployments(props: {
-  list?: Deployment[]
-  loading: boolean
-  error: Error | null
+  appId: string
+  /** Page 1, which the page header polls already. */
+  first: UseQueryResult<Page<Deployment>>
+  page: number
+  onPage: (page: number) => void
   currentId: string
-  selected: string | null
-  onSelect: (id: string) => void
+  /** The deployment whose timeline and log are open; null = none. */
+  open: string | null
+  onOpen: (id: string | null) => void
+  onRolledBack: (id: string) => void
   git: boolean
 }) {
   const t = useT()
-  const selected = props.list?.find((d) => d.id === props.selected)
-  const busy = !!props.list?.some(isActive)
+  const other = useQuery({
+    ...deploymentsQuery(props.appId, props.page),
+    enabled: props.page > 1,
+    refetchInterval: (q) => (q.state.data?.items.some(isActive) ? 1500 : false),
+    placeholderData: keepPreviousData,
+  })
+  const q = props.page > 1 ? other : props.first
+  const list = q.data?.items
+  const total = props.first.data?.total ?? q.data?.total ?? 0
+  const pages = Math.max(1, Math.ceil(total / deploymentsPerPage))
+  // Only the first page can hold a running deployment; it alone decides "busy".
+  const busy = !!props.first.data?.items.some(isActive)
+
   return (
-    <div className="space-y-6">
-      <Panel title={t.app.tabs.deployments}>
-        <QueryState loading={props.loading} error={props.error} what={t.app.whatDeployments} />
-        {props.list &&
-          (props.list.length === 0 ? (
-            <Empty title={t.app.noDeployments}>{t.app.noDeploymentsHint}</Empty>
-          ) : (
-            <ul className="divide-y divide-line">
-              {props.list.map((d) => (
+    <Panel title={t.app.tabs.deployments}>
+      <QueryState loading={q.isPending} error={q.error} what={t.app.whatDeployments} />
+      {list &&
+        (list.length === 0 && props.page === 1 ? (
+          <Empty title={t.app.noDeployments}>{t.app.noDeploymentsHint}</Empty>
+        ) : (
+          <ul className="divide-y divide-line">
+            {list.map((d) => {
+              const open = d.id === props.open
+              return (
                 <li key={d.id}>
                   <button
                     type="button"
-                    onClick={() => props.onSelect(d.id)}
-                    aria-pressed={d.id === props.selected}
+                    onClick={() => props.onOpen(open ? null : d.id)}
+                    aria-expanded={open}
                     className={cx(
                       'flex w-full flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 text-start hover:bg-raised',
-                      d.id === props.selected && 'bg-raised',
+                      open && 'bg-raised',
                     )}
                   >
                     <span className="w-24 shrink-0">
@@ -386,75 +417,91 @@ function Deployments(props: {
                       {d.rollback_of && <span className="ms-2 text-xs text-muted">↩ {t.app.rollbackOf}</span>}
                       {d.id === props.currentId && <span className="ms-2 text-xs text-accent">{t.app.live}</span>}
                     </span>
-                    <span className="w-full shrink-0 text-xs text-muted sm:w-auto" title={dateTime(d.created_at)}>
+                    <span className="shrink-0 text-xs text-muted" title={dateTime(d.created_at)}>
                       {t.app.took(timeAgo(d.created_at), duration(d.started_at, isActive(d) ? null : d.finished_at))}
                     </span>
+                    <span aria-hidden className={cx('shrink-0 text-xs text-muted transition-transform', open && 'rotate-90')}>
+                      ›
+                    </span>
                   </button>
+                  {open && <DeploymentDetails deployment={d} busy={busy} git={props.git} onRolledBack={props.onRolledBack} />}
                 </li>
-              ))}
-            </ul>
-          ))}
-      </Panel>
-      {selected && <DeploymentLog deployment={selected} busy={busy} git={props.git} onRolledBack={props.onSelect} />}
-    </div>
+              )
+            })}
+          </ul>
+        ))}
+      {pages > 1 && (
+        <nav className="flex items-center justify-between gap-2 border-t border-line px-4 py-2 text-xs text-muted" aria-label={t.app.pagination}>
+          <Button variant="ghost" className="h-7 px-3" disabled={props.page <= 1} onClick={() => props.onPage(props.page - 1)}>
+            {t.app.newer}
+          </Button>
+          <span className="tabular-nums">{t.app.pageOf(props.page, pages)}</span>
+          <Button variant="ghost" className="h-7 px-3" disabled={props.page >= pages} onClick={() => props.onPage(props.page + 1)}>
+            {t.app.older}
+          </Button>
+        </nav>
+      )}
+    </Panel>
   )
 }
 
-function DeploymentLog(props: { deployment: Deployment; busy: boolean; git: boolean; onRolledBack: (id: string) => void }) {
+/** DeploymentDetails is what opens under a deployment's row: its actions, timeline and log. */
+function DeploymentDetails(props: { deployment: Deployment; busy: boolean; git: boolean; onRolledBack: (id: string) => void }) {
   const { deployment } = props
   const t = useT()
   const queryClient = useQueryClient()
-  const list = deploymentsQuery(deployment.app_id).queryKey
+  const all = deploymentsKey(deployment.app_id)
   const cancel = useMutation({
     mutationFn: () => api<Deployment>(`/deployments/${deployment.id}/cancel`, { method: 'POST' }),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: list }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: all }),
   })
-  // The rollback is a new deployment: it goes on top of the list and its log opens.
+  // The rollback is a new deployment: it goes on top of the first page and opens.
   const rollback = useMutation({
     mutationFn: () => api<Deployment>(`/deployments/${deployment.id}/rollback`, { method: 'POST' }),
     onSuccess: (d) => {
-      queryClient.setQueryData<Deployment[]>(list, (old) => [d, ...(old ?? [])])
+      queryClient.setQueryData(deploymentsQuery(deployment.app_id).queryKey, addDeployment(d))
       props.onRolledBack(d.id)
     },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: list }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: all }),
   })
+  const actions = isActive(deployment) || deployment.can_roll_back
   return (
-    <Panel
-      title={t.app.logTitle(dateTime(deployment.created_at))}
-      actions={
-        <div className="flex items-center gap-2">
-          {isActive(deployment) && (
-            <Button
-              variant="ghost"
-              type="button"
-              title={t.app.cancelDeploymentHint}
-              disabled={cancel.isPending}
-              onClick={() => cancel.mutate()}
-            >
-              {t.app.cancelDeployment}
-            </Button>
-          )}
-          {deployment.can_roll_back && (
-            <ConfirmButton
-              variant="ghost"
-              label={t.app.rollBack}
-              confirm={t.app.rollBackConfirm}
-              disabled={props.busy}
-              pending={rollback.isPending}
-              onConfirm={() => rollback.mutate()}
-            />
-          )}
-          <Badge tone={deployTone[deployment.status]}>{t.app.deployStatus[deployment.status]}</Badge>
+    <div className="border-t border-line bg-bg">
+      {actions && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-2">
+          <p className="min-w-0 flex-1 text-xs text-muted">
+            {deployment.can_roll_back && (
+              <>
+                {t.app.rollBackHint}
+                {props.git && ` ${t.app.rollBackGitNote}`}
+              </>
+            )}
+          </p>
+          <div className="flex items-center gap-2">
+            {isActive(deployment) && (
+              <Button
+                variant="ghost"
+                type="button"
+                title={t.app.cancelDeploymentHint}
+                disabled={cancel.isPending}
+                onClick={() => cancel.mutate()}
+              >
+                {t.app.cancelDeployment}
+              </Button>
+            )}
+            {deployment.can_roll_back && (
+              <ConfirmButton
+                variant="ghost"
+                label={t.app.rollBack}
+                confirm={t.app.rollBackConfirm}
+                disabled={props.busy}
+                pending={rollback.isPending}
+                onConfirm={() => rollback.mutate()}
+              />
+            )}
+          </div>
         </div>
-      }
-    >
-      {deployment.can_roll_back && (
-        <p className="border-b border-line px-4 py-2 text-xs text-muted">
-          {t.app.rollBackHint}
-          {props.git && ` ${t.app.rollBackGitNote}`}
-        </p>
       )}
-      <DeploymentTimeline deployment={deployment} />
       {cancel.error && <p className="border-b border-line px-4 py-2 text-xs text-danger">{cancel.error.message}</p>}
       {rollback.error && <p className="border-b border-line px-4 py-2 text-xs text-danger">{rollback.error.message}</p>}
       {deployment.error && (
@@ -462,9 +509,10 @@ function DeploymentLog(props: { deployment: Deployment; busy: boolean; git: bool
           {deployment.error}
         </p>
       )}
-      {/* The key reopens the stream when another deployment is selected. */}
+      <DeploymentTimeline deployment={deployment} />
+      {/* The key reopens the stream when another deployment is opened. */}
       <LogViewer key={deployment.id} url={`/api/deployments/${deployment.id}/log/stream`} />
-    </Panel>
+    </div>
   )
 }
 

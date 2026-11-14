@@ -9,6 +9,19 @@ export class ApiError extends Error {
 }
 
 export async function api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  return (await request<T>(path, init)).data
+}
+
+/** A page of a list, and how many items the list has in all (the X-Total-Count header). */
+export type Page<T> = { items: T[]; total: number }
+
+export async function apiPage<T>(path: string): Promise<Page<T>> {
+  const { data, res } = await request<T[]>(path)
+  const total = Number(res.headers.get('X-Total-Count'))
+  return { items: data ?? [], total: Number.isFinite(total) ? total : (data?.length ?? 0) }
+}
+
+async function request<T>(path: string, init?: { method?: string; body?: unknown }): Promise<{ data: T; res: Response }> {
   let res: Response
   try {
     res = await fetch('/api' + path, {
@@ -20,7 +33,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
   } catch {
     throw new ApiError(0, 'network', 'Cannot reach the server.')
   }
-  if (res.status === 204) return undefined as T
+  if (res.status === 204) return { data: undefined as T, res }
   const data = await res.json().catch(() => null)
   if (!res.ok) {
     throw new ApiError(
@@ -29,7 +42,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
       data?.error?.message ?? `Request failed (${res.status}).`,
     )
   }
-  return data as T
+  return { data: data as T, res }
 }
 
 export type Meta = { name: string; slug: string; version: string; setup_required: boolean }
@@ -249,9 +262,22 @@ export const appQuery = (id: string) => ({
   queryFn: () => api<App>(`/apps/${id}`),
 })
 
-export const deploymentsQuery = (appId: string) => ({
-  queryKey: ['apps', appId, 'deployments'] as const,
-  queryFn: () => api<Deployment[]>(`/apps/${appId}/deployments`),
+/** How many deployments a page of an app's list shows. */
+export const deploymentsPerPage = 10
+
+/** The key of every page of an app's deployments, to invalidate them all. */
+export const deploymentsKey = (appId: string) => ['apps', appId, 'deployments'] as const
+
+/** One page of an app's deployments, newest first; page 1 holds the latest. */
+export const deploymentsQuery = (appId: string, page = 1) => ({
+  queryKey: [...deploymentsKey(appId), page] as const,
+  queryFn: () => apiPage<Deployment>(`/apps/${appId}/deployments?page=${page}&per_page=${deploymentsPerPage}`),
+})
+
+/** addDeployment puts a deployment just made on top of the first page. */
+export const addDeployment = (d: Deployment) => (old: Page<Deployment> | undefined): Page<Deployment> => ({
+  items: [d, ...(old?.items ?? [])].slice(0, deploymentsPerPage),
+  total: (old?.total ?? 0) + 1,
 })
 
 /** A queued or running deployment, with what is needed to name it and link to its app. */

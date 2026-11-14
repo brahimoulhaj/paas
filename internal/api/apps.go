@@ -669,11 +669,22 @@ func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 	if s.storeError(w, "get app", err, "") {
 		return
 	}
-	list, err := s.store.ListDeployments(r.Context(), a.ID, 50)
+	// Paged: ?page (from 1) and ?per_page (default 50, at most 100). The total goes in
+	// X-Total-Count, so the body stays a plain list.
+	q := r.URL.Query()
+	perPage, _ := strconv.Atoi(q.Get("per_page"))
+	if perPage <= 0 {
+		perPage = 50
+	}
+	perPage = min(perPage, 100)
+	page, _ := strconv.Atoi(q.Get("page"))
+	page = max(page, 1)
+	list, total, err := s.store.ListDeploymentsPage(r.Context(), a.ID, perPage, (page-1)*perPage)
 	if err != nil {
 		s.internal(w, "list deployments", err)
 		return
 	}
+	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	out := mapSlice(list, toDeploymentJSON)
 	if s.deployer != nil {
 		// Without the container host the list still shows; rollbacks are just not offered.

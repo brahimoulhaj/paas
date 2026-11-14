@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -504,5 +505,48 @@ func TestDeploymentPhasesAPI(t *testing.T) {
 	want := []string{"pulling", "starting", "health_checking", "switching", "draining", "succeeded"}
 	if d["phase"] != "draining" || strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Errorf("phase %v, phases %v, want draining and %v", d["phase"], names, want)
+	}
+}
+
+func TestListDeploymentsPaged(t *testing.T) {
+	e := newEnv(t)
+	e.signIn()
+	pid := e.must(201, "POST", "/api/projects", map[string]any{"name": "Shop"})["id"].(string)
+	id := e.must(201, "POST", "/api/projects/"+pid+"/apps", map[string]any{"name": "web", "image": "nginx:1", "port": 80})["id"].(string)
+	var ids []string
+	for range 5 {
+		ids = append(ids, e.must(202, "POST", "/api/apps/"+id+"/deploy", nil)["id"].(string))
+		e.deployer.Wait()
+	}
+
+	page := func(q string) ([]string, string) {
+		t.Helper()
+		res, err := e.client.Get(e.url + "/api/apps/" + id + "/deployments" + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var list []map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&list); err != nil {
+			t.Fatal(err)
+		}
+		out := []string{}
+		for _, d := range list {
+			out = append(out, d["id"].(string))
+		}
+		return out, res.Header.Get("X-Total-Count")
+	}
+	// Newest first: page 1 of 2 is the last two made.
+	if got, total := page("?per_page=2"); total != "5" || !slices.Equal(got, []string{ids[4], ids[3]}) {
+		t.Errorf("page 1 = %v (total %s)", got, total)
+	}
+	if got, _ := page("?per_page=2&page=3"); !slices.Equal(got, []string{ids[0]}) {
+		t.Errorf("page 3 = %v", got)
+	}
+	if got, _ := page("?per_page=2&page=9"); len(got) != 0 {
+		t.Errorf("past the end = %v", got)
+	}
+	if got, total := page(""); total != "5" || len(got) != 5 {
+		t.Errorf("default = %v (total %s)", got, total)
 	}
 }
