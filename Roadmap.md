@@ -9,13 +9,14 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ (nearly done) · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Where we are (2026-11-13, v0.6.0):** M2 is done except pushing builds to a registry, more builders (Nixpacks, Buildpacks, Static), a Gitea token, a build-time env flag and cron. M3 has push/CI webhooks; health checks, rollback and the deploy state machine are next. v0.6.0 checked on the VPS (2026-11-14): build caps, resume after restart, deploy keys, private registries, deploy webhooks, Railpack without a Dockerfile, cancel in the browser.
+**Where we are (2026-11-13, v0.6.0):** M2 is done except pushing builds to a registry, more builders (Nixpacks, Buildpacks, Static), a Gitea token, a build-time env flag and cron. M3 has push/CI webhooks and health checks before the traffic switch; rollback and the deploy state machine are next. v0.6.0 checked on the VPS (2026-11-14): build caps, resume after restart, deploy keys, private registries, deploy webhooks, Railpack without a Dockerfile, cancel in the browser.
 
 **Next up:**
-1. Code, M3: HTTP health checks before switching traffic (`app_health_checks`), then rollback to one of the 5 kept images without a build, then the deploy timeline per state.
-2. Then: push builds to a registry (closes M2), or M4 databases (Postgres, MariaDB, S3 backups).
-3. Check whether "Build log stream on the deployment page" is already covered by the deployment log (Git build output streams there with `|` lines) and tick it if so.
-4. Record the fresh-install time with image download (M1, "Under 60 seconds").
+1. On the VPS (manual), once released: save an HTTP check on an app and deploy (log shows "Health check passed"); set a wrong path or status and deploy (fails after the start period, the old container keeps serving); create a new app and check it gets the TCP check.
+2. Code, M3: rollback to one of the 5 kept images without a build, then the deploy timeline per state.
+3. Then: push builds to a registry (closes M2), or M4 databases (Postgres, MariaDB, S3 backups).
+4. Check whether "Build log stream on the deployment page" is already covered by the deployment log (Git build output streams there with `|` lines) and tick it if so.
+5. Record the fresh-install time with image download (M1, "Under 60 seconds").
 ---
 
 ## M0 — Project skeleton
@@ -217,11 +218,11 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 - [x] Resume or fail cleanly after a panel restart mid-deploy; no orphan containers — see Jobs and queue (M2); per-state resume comes with the state machine
 
 ### Health checks
-- [ ] Migration: `app_health_checks`, `volumes`, `certificates`
-- [ ] `tcp` (default)
-- [ ] `http` — path, expected status, interval, timeout, retries, start period
-- [ ] `running` — stays up for N seconds
-- [ ] Checks run by the panel from inside the Docker network
+- [~] Migration: `app_health_checks`, `volumes`, `certificates` — `0012_app_health_checks.sql` (one row per app, removed with it); volumes live in `apps.mounts` (`0006`); `certificates` comes with custom TLS
+- [x] `tcp` (default) — what new apps get (port accepts a connection, start period 30 s, every 2 s, 3 failures in a row). Apps created before keep the old 3-second stay-up wait until a check is saved (`LegacyHealthCheck`); the settings say so
+- [x] `http` — path, expected status, interval, timeout, retries, start period — GET on the container, redirects not followed, expected status 0 = any 2xx or 3xx; failures during the start period do not count, one success passes; a crash fails at once whatever the check (`TestHealthCheck`, `TestHealthCheckStartPeriod`, `TestHealthCheckAPI`)
+- [x] `running` — stays up for N seconds — for workers that do not listen
+- [~] Checks run by the panel from inside the Docker network — by container name and port, before the traffic switch; a failed check removes the new container and leaves the route. A panel run on the host (`make dev-api`) cannot reach containers, so it only waits 3 s and says so in the log (`TestHealthCheckOutsideNetwork`, checked in the browser (2026-11-14)). Not yet run on the compose stack or the VPS
 - [ ] Continuous health monitoring after deploy (feeds alerts in M6)
 
 ### Strategies
@@ -245,7 +246,7 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 - [ ] Domain redirects (`redirect_to`), www / apex
 
 ### UI
-- [ ] Health check settings
+- [x] Health check settings — app Settings → Health check: type, path, expected status, start period, interval, timeout, failures in a row; checked in a browser (2026-11-14)
 - [ ] Deployment timeline with per-state timing
 - [ ] Rollback picker
 - [x] Webhook and auto-deploy settings — Deploy webhook panel in the app's Settings: URL with Copy, how to add it on GitHub, GitLab and Gitea (or a curl line for image apps), a warning when the panel is reached on a local address

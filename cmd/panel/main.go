@@ -242,7 +242,7 @@ func serve(ctx context.Context, cfg config.Config) error {
 	deployer := deploy.New(ctx, deploy.Options{
 		DataVolume: cfg.DataVolume, MaxBuilds: cfg.MaxBuilds,
 		Store: st, Executor: ex, Router: px, Builder: builds, GitAuth: git, DataDir: cfg.DataDir, Log: log,
-		Ready: proxyReady,
+		Ready: proxyReady, OutsideNetwork: !inContainer(),
 	})
 	if r, err := deployer.Recover(ctx); err != nil {
 		return err
@@ -383,10 +383,17 @@ func panelUpstream(cfg config.Config) string {
 	if err != nil || port == "" {
 		port = "8080"
 	}
-	if _, err := os.Stat("/.dockerenv"); err == nil {
+	if inContainer() {
 		return net.JoinHostPort(brand.Slug, port)
 	}
 	return net.JoinHostPort("host.docker.internal", port)
+}
+
+// inContainer reports whether the panel runs in a Docker container, so on the apps'
+// network; run straight on a host it is development.
+func inContainer() bool {
+	_, err := os.Stat("/.dockerenv")
+	return err == nil
 }
 
 func printSetupLink(ctx context.Context, cfg config.Config, acc *account.Service) error {

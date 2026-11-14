@@ -501,6 +501,10 @@ func (s *Server) handleCreateApp(w http.ResponseWriter, r *http.Request) {
 	if a.SourceType == store.SourceGit {
 		detail = a.Git.Repository + " (" + a.Git.Branch + ")"
 	}
+	// New apps wait for their port to accept a connection; older ones keep the short wait.
+	if err := s.store.SetAppHealthCheck(r.Context(), a.ID, store.DefaultHealthCheck()); err != nil {
+		s.log.Error("default health check", "app", a.ID, "error", err)
+	}
 	s.audit(r, "app.create", "app", a.ID, a.Name, detail)
 	writeJSON(w, http.StatusCreated, toAppJSON(a))
 }

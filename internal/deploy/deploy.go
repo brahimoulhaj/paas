@@ -1,7 +1,7 @@
 // Package deploy turns an app's settings into a running container and keeps the proxy
 // pointed at it. This is the minimal pipeline: pull (or, for a Git app, fetch and build),
-// start, switch the route, remove the old container. Health checks, draining and rollback
-// build on it later.
+// start, wait for the health check, switch the route, remove the old container. Draining
+// and rollback build on it later.
 package deploy
 
 import (
@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -65,8 +66,15 @@ type Options struct {
 	DataDir    string  // deployment logs live in <DataDir>/deployments, build workspaces in <DataDir>/builds
 	Log        *slog.Logger
 	// StartGrace is how long a new container must stay up before traffic is switched to
-	// it. It catches images that crash on start; real health checks replace it later.
+	// it, for an app with no health check saved. It catches images that crash on start.
 	StartGrace time.Duration
+	// Dial opens the connections of health checks; nil = a plain net.Dialer. The panel
+	// shares a Docker network with the apps, so it reaches a container by its name.
+	Dial func(ctx context.Context, network, address string) (net.Conn, error)
+	// OutsideNetwork says the panel runs straight on the host (development), off the
+	// apps' Docker network: TCP and HTTP checks cannot reach a container, so a deploy only
+	// waits StartGrace for the container to stay up, and says so in its log.
+	OutsideNetwork bool
 	// StopGrace is how long a container gets to exit before it is killed.
 	StopGrace time.Duration
 	// MaxBuilds is how many Git builds run at once; 0 = 1. Further Git deploys stay queued
@@ -107,6 +115,9 @@ type cancellable struct {
 func New(ctx context.Context, opts Options) *Service {
 	if opts.StartGrace == 0 {
 		opts.StartGrace = 3 * time.Second
+	}
+	if opts.Dial == nil {
+		opts.Dial = (&net.Dialer{}).DialContext
 	}
 	if opts.StopGrace == 0 {
 		opts.StopGrace = 10 * time.Second
@@ -471,7 +482,15 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 		fail(containerID, err)
 		return
 	}
-	if err := s.waitStable(ctx, containerID, logw); err != nil {
+	check, saved, err := st.AppHealthCheck(final, app.ID)
+	if err != nil {
+		fail(containerID, err)
+		return
+	}
+	if !saved {
+		check = store.HealthCheck{Type: store.HealthRunning}
+	}
+	if err := s.waitHealthy(ctx, check, containerID, name, dep.Port, logw); err != nil {
 		fail(containerID, err)
 		return
 	}
@@ -756,39 +775,146 @@ func imageTag(appID, commit string) string {
 	return strings.ToLower("app-"+appID) + ":" + commit
 }
 
-// waitStable gives the container StartGrace to prove it does not crash on start. Under
-// the restart policy a crashing container is restarted at once, so "running" alone proves
-// nothing: a restart, or the "restarting" state, counts as a crash too.
-func (s *Service) waitStable(ctx context.Context, containerID string, logw *logWriter) error {
-	deadline := time.Now().Add(s.opts.StartGrace)
-	for {
-		c, err := s.opts.Executor.InspectContainer(ctx, containerID)
+// waitHealthy returns once the new container passes its health check. A check with no
+// type set is the one of apps that never saved one: the container stays up for StartGrace.
+// Whatever the check, a container that exits or restarts meanwhile fails at once.
+func (s *Service) waitHealthy(ctx context.Context, h store.HealthCheck, containerID, name string, port int, logw *logWriter) error {
+	second := func(n int) time.Duration { return time.Duration(n) * time.Second }
+	start := time.Now()
+	if h.Type == store.HealthRunning {
+		stay := second(h.StartPeriod)
+		if h.StartPeriod == 0 {
+			stay = s.opts.StartGrace
+		} else {
+			logw.printf("Health check: the container must stay up for %s", stay)
+		}
+		for {
+			if err := s.checkAlive(ctx, containerID, logw); err != nil {
+				return err
+			}
+			left := stay - time.Since(start)
+			if left <= 0 {
+				return nil
+			}
+			if err := sleep(ctx, min(250*time.Millisecond, left)); err != nil {
+				return err
+			}
+		}
+	}
+
+	if s.opts.OutsideNetwork {
+		logw.printf("Health check: skipped, the panel runs outside Docker and cannot reach the container; it only has to stay up for %s", s.opts.StartGrace)
+		return s.waitHealthy(ctx, store.HealthCheck{Type: store.HealthRunning}, containerID, name, port, logw)
+	}
+	target := net.JoinHostPort(name, strconv.Itoa(port))
+	if h.Type == store.HealthHTTP {
+		target = "http://" + target + h.Path
+	}
+	logw.printf("Health check: %s %s every %ds (timeout %ds); failures do not count during the first %ds, then %d in a row fail the deploy",
+		strings.ToUpper(h.Type), target, h.Interval, h.Timeout, h.StartPeriod, h.Retries)
+	failures, waiting := 0, false
+	for attempt := 1; ; attempt++ {
+		if err := s.checkAlive(ctx, containerID, logw); err != nil {
+			return err
+		}
+		err := s.probe(ctx, h, name, port)
+		if err == nil {
+			logw.printf("Health check passed (attempt %d, after %s)", attempt, time.Since(start).Round(100*time.Millisecond))
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if time.Since(start) < second(h.StartPeriod) {
+			if !waiting {
+				logw.printf("Not ready yet: %v", err)
+				waiting = true
+			}
+		} else {
+			failures++
+			logw.printf("Health check failed (%d of %d): %v", failures, h.Retries, err)
+			if failures >= h.Retries {
+				return fmt.Errorf("health check failed %d times in a row: %v", failures, err)
+			}
+		}
+		if err := sleep(ctx, second(h.Interval)); err != nil {
+			return err
+		}
+	}
+}
+
+// probe runs one attempt of a TCP or HTTP health check against the container.
+func (s *Service) probe(ctx context.Context, h store.HealthCheck, name string, port int) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(h.Timeout)*time.Second)
+	defer cancel()
+	addr := net.JoinHostPort(name, strconv.Itoa(port))
+	if h.Type == store.HealthTCP {
+		conn, err := s.opts.Dial(ctx, "tcp", addr)
 		if err != nil {
 			return err
 		}
-		if !c.Running || c.State == "restarting" || c.Restarts > 0 {
-			var lines []string
-			_ = s.opts.Executor.Logs(ctx, containerID, executor.LogOptions{Tail: 20}, func(l executor.LogLine) {
-				lines = append(lines, l.Text)
-				logw.printf("  | %s", l.Text)
-			})
-			reason := fmt.Sprintf("the container exited right after start (exit code %d)", c.ExitCode)
-			if c.OOMKilled {
-				reason = "the container was killed for exceeding its memory limit"
-			}
-			if len(lines) > 0 {
-				reason += ": " + lines[len(lines)-1]
-			}
-			return errors.New(reason)
+		return conn.Close()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+addr+h.Path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("User-Agent", "berth-health-check")
+	client := &http.Client{
+		Transport:     &http.Transport{DialContext: s.opts.Dial, DisableKeepAlives: true},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	ok := resp.StatusCode >= 200 && resp.StatusCode < 400
+	if h.ExpectedStatus != 0 {
+		ok = resp.StatusCode == h.ExpectedStatus
+	}
+	if !ok {
+		if h.ExpectedStatus != 0 {
+			return fmt.Errorf("answered %d, expected %d", resp.StatusCode, h.ExpectedStatus)
 		}
-		if !time.Now().Before(deadline) {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(min(250*time.Millisecond, s.opts.StartGrace)):
-		}
+		return fmt.Errorf("answered %d, expected 2xx or 3xx", resp.StatusCode)
+	}
+	return nil
+}
+
+// checkAlive fails when the container has crashed. Under the restart policy a crashing
+// container is restarted at once, so "running" alone proves nothing: a restart, or the
+// "restarting" state, counts as a crash too. Its last log lines go into the deploy log.
+func (s *Service) checkAlive(ctx context.Context, containerID string, logw *logWriter) error {
+	c, err := s.opts.Executor.InspectContainer(ctx, containerID)
+	if err != nil {
+		return err
+	}
+	if c.Running && c.State != "restarting" && c.Restarts == 0 {
+		return nil
+	}
+	var lines []string
+	_ = s.opts.Executor.Logs(ctx, containerID, executor.LogOptions{Tail: 20}, func(l executor.LogLine) {
+		lines = append(lines, l.Text)
+		logw.printf("  | %s", l.Text)
+	})
+	reason := fmt.Sprintf("the container exited right after start (exit code %d)", c.ExitCode)
+	if c.OOMKilled {
+		reason = "the container was killed for exceeding its memory limit"
+	}
+	if len(lines) > 0 {
+		reason += ": " + lines[len(lines)-1]
+	}
+	return errors.New(reason)
+}
+
+// sleep waits d, or less when ctx ends first.
+func sleep(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
 	}
 }
 

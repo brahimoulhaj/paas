@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -54,6 +55,12 @@ func newEnv(t *testing.T) *env {
 	ex := executortest.New()
 	deployer := deploy.New(context.Background(), deploy.Options{
 		Store: st, Executor: ex, DataDir: dir, Log: log, StartGrace: 10 * time.Millisecond,
+		// New apps get a TCP health check: every fake container accepts the connection.
+		Dial: func(context.Context, string, string) (net.Conn, error) {
+			c1, c2 := net.Pipe()
+			c2.Close()
+			return c1, nil
+		},
 	})
 	api.SetDeployer(deployer)
 	srv := httptest.NewServer(api.Handler())

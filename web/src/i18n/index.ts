@@ -21,6 +21,7 @@ import * as settingsUpdates from './settingsUpdates'
 import * as settingsBuilds from './settingsBuilds'
 import * as registries from './registries'
 import * as deployHook from './deployHook'
+import * as healthCheck from './healthCheck'
 import * as onboarding from './onboarding'
 import * as terminal from './terminal'
 import * as metrics from './metrics'
@@ -52,6 +53,7 @@ const pick = (l: Code) => ({
   settingsBuilds: settingsBuilds[l] as typeof settingsBuilds.en,
   registries: registries[l] as typeof registries.en,
   deployHook: deployHook[l] as typeof deployHook.en,
+  healthCheck: healthCheck[l] as typeof healthCheck.en,
   onboarding: onboarding[l] as typeof onboarding.en,
 })
 

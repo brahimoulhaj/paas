@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DnsHintText } from '../components/dns'
 import { DeployHookPanel } from '../components/deploy-hook'
+import { HealthCheckPanel } from '../components/health-check'
 import { LogViewer } from '../components/logviewer'
 import { Badge, Button, ConfirmButton, cx, Empty, ErrorNote, Field, HelpTip, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
 import {
@@ -577,7 +578,7 @@ function DomainRow({ domain, onChanged }: { domain: Domain; onChanged: () => voi
 
 // ---- settings ----
 
-export const settingsSections = ['general', 'source', 'resources', 'environment', 'volumes', 'webhook', 'danger'] as const
+export const settingsSections = ['general', 'source', 'resources', 'environment', 'volumes', 'health', 'webhook', 'danger'] as const
 export type SettingsSection = (typeof settingsSections)[number]
 
 /** App settings, grouped by family: a vertical menu (a strip on phones) and one section. */
@@ -614,6 +615,7 @@ function Settings({ app }: { app: App }) {
         {section === 'resources' && <ResourceSettings key={app.id} app={app} />}
         {section === 'environment' && <EnvironmentSettings key={app.id} app={app} />}
         {section === 'volumes' && <MountSettings key={`mounts-${app.id}`} app={app} />}
+        {section === 'health' && <HealthCheckPanel app={app} />}
         {section === 'webhook' && <DeployHookPanel app={app} />}
         {section === 'danger' && <DangerZone app={app} />}
       </div>

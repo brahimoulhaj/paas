@@ -104,3 +104,42 @@ func TestSettings(t *testing.T) {
 		t.Fatal("setting not deleted")
 	}
 }
+
+func TestAppHealthCheck(t *testing.T) {
+	s, ctx := open(t), context.Background()
+	p, err := s.CreateProject(ctx, "Shop", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateApp(ctx, p.ID, AppInput{Name: "web", Image: "nginx:1", Port: 80})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, saved, err := s.AppHealthCheck(ctx, a.ID)
+	if err != nil || saved || h != LegacyHealthCheck() {
+		t.Fatalf("unsaved = %+v %v %v, want the legacy check", h, saved, err)
+	}
+	want := HealthCheck{Type: HealthHTTP, Path: "/up", ExpectedStatus: 200, Interval: 5, Timeout: 2, Retries: 4, StartPeriod: 60}
+	for range 2 { // insert, then update
+		if err := s.SetAppHealthCheck(ctx, a.ID, want); err != nil {
+			t.Fatal(err)
+		}
+		if h, saved, err = s.AppHealthCheck(ctx, a.ID); err != nil || !saved || h != want {
+			t.Fatalf("saved = %+v %v %v, want %+v", h, saved, err, want)
+		}
+		want.Type, want.Path = HealthTCP, ""
+	}
+	if err := s.SetAppHealthCheck(ctx, "nope", want); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown app: %v", err)
+	}
+	if _, _, err := s.AppHealthCheck(ctx, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown app: %v", err)
+	}
+	if err := s.DeleteApp(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM app_health_checks`).Scan(&n); err != nil || n != 0 {
+		t.Errorf("rows after delete = %d %v", n, err)
+	}
+}

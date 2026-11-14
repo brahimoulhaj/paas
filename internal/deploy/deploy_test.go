@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -1074,5 +1077,149 @@ func TestDeployFromPrivateRegistry(t *testing.T) {
 	pulls := len(e.ex.PullAuths)
 	if d := e.deploy(); d.Status != store.DeployFailed || !strings.Contains(d.Error, "only sent to their own registry") || len(e.ex.PullAuths) != pulls {
 		t.Errorf("other host: %+v, %d pulls", d, len(e.ex.PullAuths)-pulls)
+	}
+}
+
+// TestHealthCheck runs saved TCP and HTTP checks against a local server standing in for
+// the container: the dialer sends every health check connection there.
+func TestHealthCheck(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	if _, err := e.st.CreateDomain(ctx, e.app.ID, "shop.example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	e.router.known[e.app.ID] = true
+
+	var mu sync.Mutex
+	status, hits := http.StatusOK, 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		hits++
+		if r.URL.Path != "/healthz" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(status)
+	}))
+	t.Cleanup(srv.Close)
+	var dialed []string
+	e.svc.opts.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		mu.Lock()
+		dialed = append(dialed, addr)
+		mu.Unlock()
+		return (&net.Dialer{}).DialContext(ctx, network, srv.Listener.Addr().String())
+	}
+	save := func(h store.HealthCheck) {
+		t.Helper()
+		if err := e.st.SetAppHealthCheck(ctx, e.app.ID, h); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logOf := func(dep store.Deployment) string {
+		raw, _ := os.ReadFile(e.svc.LogPath(dep))
+		return string(raw)
+	}
+
+	// TCP: the container's name and port are dialed, and the deploy goes through.
+	save(store.HealthCheck{Type: store.HealthTCP, Interval: 1, Timeout: 1, Retries: 1})
+	good := e.deploy()
+	if good.Status != store.DeploySucceeded {
+		t.Fatalf("tcp check: %+v\n%s", good, logOf(good))
+	}
+	if want := good.ContainerName + ":80"; len(dialed) == 0 || dialed[0] != want {
+		t.Errorf("dialed %v, want %s", dialed, want)
+	}
+	if !strings.Contains(logOf(good), "Health check passed (attempt 1") {
+		t.Errorf("log has no passed line:\n%s", logOf(good))
+	}
+
+	// HTTP: the path is requested, the status compared.
+	save(store.HealthCheck{Type: store.HealthHTTP, Path: "/healthz", ExpectedStatus: 204, Interval: 1, Timeout: 1, Retries: 2})
+	mu.Lock()
+	status = http.StatusNoContent
+	mu.Unlock()
+	if good = e.deploy(); good.Status != store.DeploySucceeded {
+		t.Fatalf("http check: %+v\n%s", good, logOf(good))
+	}
+	wantRoute := e.router.last(e.app.ID)
+
+	// A wrong status fails after Retries attempts; the old container keeps serving.
+	mu.Lock()
+	status, hits = http.StatusServiceUnavailable, 0
+	mu.Unlock()
+	dep := e.deploy()
+	if dep.Status != store.DeployFailed || !strings.Contains(dep.Error, "health check failed 2 times in a row: answered 503, expected 204") {
+		t.Fatalf("failing check: %+v", dep)
+	}
+	if hits != 2 {
+		t.Errorf("hits = %d, want 2", hits)
+	}
+	cs := e.containers()
+	if len(cs) != 1 || cs[0].Name != good.ContainerName {
+		t.Errorf("containers = %+v, want only %s", cs, good.ContainerName)
+	}
+	if got := e.router.last(e.app.ID); got[0] != wantRoute[0] {
+		t.Errorf("route = %v, want untouched %v", got, wantRoute)
+	}
+
+	// Expected status 0 takes any 2xx or 3xx, and redirects are not followed.
+	save(store.HealthCheck{Type: store.HealthHTTP, Path: "/healthz", Interval: 1, Timeout: 1, Retries: 1})
+	mu.Lock()
+	status = http.StatusFound
+	mu.Unlock()
+	if dep := e.deploy(); dep.Status != store.DeploySucceeded {
+		t.Fatalf("302 with any 2xx/3xx: %+v\n%s", dep, logOf(dep))
+	}
+
+	// A crash fails at once, whatever the check.
+	e.setImage("crasher:1")
+	e.ex.CrashOnStart["crasher:1"] = true
+	if dep := e.deploy(); dep.Status != store.DeployFailed || !strings.Contains(dep.Error, "exited right after start") {
+		t.Fatalf("crash under an http check: %+v", dep)
+	}
+}
+
+// TestHealthCheckStartPeriod: failures during the start period do not count.
+func TestHealthCheckStartPeriod(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	var mu sync.Mutex
+	calls := 0
+	e.svc.opts.Dial = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		calls++
+		if calls < 2 { // refused once, then the app is up
+			return nil, errors.New("connection refused")
+		}
+		c1, c2 := net.Pipe()
+		c2.Close()
+		return c1, nil
+	}
+	if err := e.st.SetAppHealthCheck(ctx, e.app.ID, store.HealthCheck{Type: store.HealthTCP, Interval: 1, Timeout: 1, Retries: 1, StartPeriod: 5}); err != nil {
+		t.Fatal(err)
+	}
+	dep := e.deploy()
+	raw, _ := os.ReadFile(e.svc.LogPath(dep))
+	if dep.Status != store.DeploySucceeded || !strings.Contains(string(raw), "Not ready yet: connection refused") {
+		t.Fatalf("deployment = %+v\n%s", dep, raw)
+	}
+}
+
+// TestHealthCheckOutsideNetwork: a panel run on the host cannot reach containers, so a
+// saved TCP check falls back to the container staying up.
+func TestHealthCheckOutsideNetwork(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	e.svc.opts.OutsideNetwork = true
+	e.svc.opts.Dial = func(context.Context, string, string) (net.Conn, error) {
+		t.Error("dialed from outside the network")
+		return nil, errors.New("no such host")
+	}
+	if err := e.st.SetAppHealthCheck(ctx, e.app.ID, store.HealthCheck{Type: store.HealthTCP, Interval: 1, Timeout: 1, Retries: 1}); err != nil {
+		t.Fatal(err)
+	}
+	dep := e.deploy()
+	raw, _ := os.ReadFile(e.svc.LogPath(dep))
+	if dep.Status != store.DeploySucceeded || !strings.Contains(string(raw), "Health check: skipped, the panel runs outside Docker") {
+		t.Fatalf("deployment = %+v\n%s", dep, raw)
 	}
 }
