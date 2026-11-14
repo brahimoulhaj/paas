@@ -117,6 +117,7 @@ type deploymentJSON struct {
 	Trigger       string     `json:"trigger"`
 	Image         string     `json:"image"`
 	CommitSHA     string     `json:"commit_sha"`
+	CommitMessage string     `json:"commit_message"`
 	Port          int        `json:"port"`
 	ContainerName string     `json:"container_name"`
 	Error         string     `json:"error"`
@@ -135,7 +136,7 @@ type deploymentJSON struct {
 
 func toDeploymentJSON(d store.Deployment) deploymentJSON {
 	out := deploymentJSON{
-		ID: d.ID, AppID: d.AppID, Status: d.Status, Trigger: d.Trigger, Image: d.Image, CommitSHA: d.CommitSHA, Port: d.Port,
+		ID: d.ID, AppID: d.AppID, Status: d.Status, Trigger: d.Trigger, Image: d.Image, CommitSHA: d.CommitSHA, CommitMessage: d.CommitMessage, Port: d.Port,
 		ContainerName: d.ContainerName, Error: d.Error, Attempts: d.Attempts, RollbackOf: d.RollbackOf, CreatedAt: d.CreatedAt,
 		Phase: d.Phase, Phases: d.Phases,
 	}

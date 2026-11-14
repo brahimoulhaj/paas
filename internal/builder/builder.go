@@ -287,6 +287,23 @@ func (l *Local) Fetch(ctx context.Context, src store.GitSource, auth Auth, dir s
 	return sha, nil
 }
 
+// maxMessage caps a stored commit message, in characters.
+const maxMessage = 2000
+
+// CommitMessage returns the message of the commit Fetch checked out in dir, trimmed and
+// cut to maxMessage characters.
+func (l *Local) CommitMessage(ctx context.Context, dir string) (string, error) {
+	out, err := exec.CommandContext(ctx, l.git(), "-C", dir, "log", "-1", "--format=%B").Output()
+	if err != nil {
+		return "", fmt.Errorf("git log: %w", err)
+	}
+	msg := []rune(strings.TrimSpace(strings.ToValidUTF8(string(out), "�")))
+	if len(msg) > maxMessage {
+		msg = append(msg[:maxMessage-1], '…')
+	}
+	return string(msg), nil
+}
+
 // sshHint explains the usual ways a clone over SSH fails, from ssh's and git's output.
 // Git ends with a generic "make sure you have the correct access rights" whatever happened.
 func sshHint(lines []string) string {

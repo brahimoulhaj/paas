@@ -546,3 +546,27 @@ exec /usr/sbin/sshd -D -e`
 		t.Error("https URL with a deploy key was accepted")
 	}
 }
+
+func TestCommitMessage(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.com"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q")
+	long := strings.Repeat("x", maxMessage+50)
+	git("commit", "-q", "--allow-empty", "-m", "Add paging", "-m", long)
+	msg, err := (&Local{}).CommitMessage(context.Background(), dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(msg, "Add paging\n\nxxx") || !strings.HasSuffix(msg, "…") || len([]rune(msg)) != maxMessage {
+		t.Errorf("message = %q… (%d characters)", msg[:20], len([]rune(msg)))
+	}
+}

@@ -178,6 +178,8 @@ export type Deployment = {
   image: string
   /** For a Git app: the commit built, empty until it is fetched. */
   commit_sha: string
+  /** For a Git app: that commit's message, '' until it is fetched (and for older deployments). */
+  commit_message: string
   port: number
   container_name: string
   error: string

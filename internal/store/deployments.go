@@ -49,6 +49,7 @@ type Deployment struct {
 	Trigger       string
 	Image         string // for a Git app: the image built, empty until the build succeeds
 	CommitSHA     string // for a Git app: the commit built, empty until it is fetched
+	CommitMessage string // for a Git app: that commit's message, empty until it is fetched
 	Port          int    // the app's port when this attempt was made
 	ContainerID   string
 	ContainerName string
@@ -65,13 +66,13 @@ type Deployment struct {
 }
 
 const deploymentCols = `id, app_id, status, trigger, image, commit_sha, port, container_id, container_name, error, log_path,
-	COALESCE(started_at, ''), COALESCE(finished_at, ''), created_at, updated_at, attempts, rollback_of, phase, phases`
+	COALESCE(started_at, ''), COALESCE(finished_at, ''), created_at, updated_at, attempts, rollback_of, phase, phases, commit_message`
 
 func scanDeployment(row scanner) (Deployment, error) {
 	var d Deployment
 	var started, finished, created, updated, phases string
 	err := row.Scan(&d.ID, &d.AppID, &d.Status, &d.Trigger, &d.Image, &d.CommitSHA, &d.Port, &d.ContainerID, &d.ContainerName, &d.Error, &d.LogPath,
-		&started, &finished, &created, &updated, &d.Attempts, &d.RollbackOf, &d.Phase, &phases)
+		&started, &finished, &created, &updated, &d.Attempts, &d.RollbackOf, &d.Phase, &phases, &d.CommitMessage)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Deployment{}, ErrNotFound
 	}
@@ -111,9 +112,9 @@ const TriggerRollback = "rollback"
 func (s *Store) CreateRollbackDeployment(ctx context.Context, src Deployment, logPath func(deploymentID string) string) (Deployment, error) {
 	did, ts := id.New(), now()
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO deployments (id, app_id, status, trigger, image, commit_sha, port, log_path, rollback_of, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		did, src.AppID, DeployQueued, TriggerRollback, src.Image, src.CommitSHA, src.Port, logPath(did), src.ID, ts, ts)
+		INSERT INTO deployments (id, app_id, status, trigger, image, commit_sha, commit_message, port, log_path, rollback_of, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		did, src.AppID, DeployQueued, TriggerRollback, src.Image, src.CommitSHA, src.CommitMessage, src.Port, logPath(did), src.ID, ts, ts)
 	if err != nil {
 		return Deployment{}, err
 	}
@@ -190,10 +191,10 @@ func (s *Store) EnterDeploymentPhase(ctx context.Context, deploymentID, phase st
 		phase, phase, string(at), now(), deploymentID))
 }
 
-// SetDeploymentCommit records the commit a Git deployment is building.
-func (s *Store) SetDeploymentCommit(ctx context.Context, deploymentID, commitSHA string) error {
+// SetDeploymentCommit records the commit a Git deployment is building, and its message.
+func (s *Store) SetDeploymentCommit(ctx context.Context, deploymentID, commitSHA, message string) error {
 	return affected(s.db.ExecContext(ctx,
-		`UPDATE deployments SET commit_sha = ?, updated_at = ? WHERE id = ?`, commitSHA, now(), deploymentID))
+		`UPDATE deployments SET commit_sha = ?, commit_message = ?, updated_at = ? WHERE id = ?`, commitSHA, message, now(), deploymentID))
 }
 
 // SetDeploymentImage records the image a Git deployment built.

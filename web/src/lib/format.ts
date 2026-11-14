@@ -50,6 +50,12 @@ export function appSource(app: App): string {
 }
 
 /** What a deployment ran: the commit for a Git app, the image otherwise. */
+/** The first line of a commit message, cut to max characters. */
+export function commitSubject(message: string, max = 72): string {
+  const line = message.split('\n', 1)[0].trim()
+  return line.length > max ? line.slice(0, max - 1).trimEnd() + '…' : line
+}
+
 export function deploymentVersion(d: Deployment): string {
   if (d.commit_sha) return tr().format.commit(d.commit_sha.slice(0, 7))
   return d.image || '—'

@@ -7,6 +7,7 @@ import { useTheme } from '../lib/theme'
 import { LanguagePicker } from './langpicker'
 import { ThemePicker } from './themepicker'
 import { DeployToasts } from './deploy-toasts'
+import { UpdateCheck } from './update-check'
 import { Badge, cx } from './ui'
 
 // Sections light up as their milestone lands; until then they show as "soon".
@@ -45,13 +46,16 @@ export function Shell() {
           <Link to="/" className="font-pixel text-lg text-accent">
             {meta.name}
           </Link>
-          {updates.data?.available ? (
-            <Link to="/settings" title={t.shell.updateAvailable(updates.data.latest ?? '')}>
-              <Badge tone="warn">{t.shell.update}</Badge>
-            </Link>
-          ) : (
-            <span className="text-[10px] text-muted">{meta.version}</span>
-          )}
+          <div className="flex items-center gap-1">
+            {updates.data?.available ? (
+              <Link to="/settings" title={t.shell.updateAvailable(updates.data.latest ?? '')}>
+                <Badge tone="warn">{t.shell.update}</Badge>
+              </Link>
+            ) : (
+              <span className="text-[10px] text-muted">{meta.version}</span>
+            )}
+            <UpdateCheck updates={updates.data} />
+          </div>
         </div>
         <div className="flex items-center gap-2 px-4">
           <button

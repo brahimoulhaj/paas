@@ -1,3 +1,4 @@
+import { Tooltip } from '@base-ui/react/tooltip'
 import { MountSettings } from '../components/mounts'
 import { EnvironmentSettings } from '../components/environment'
 import { keepPreviousData, useMutation, useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
@@ -30,7 +31,7 @@ import {
 import { SourceFields, sourceChanged, sourceForm, sourceInput } from '../components/source'
 import { rich, useT } from '../lib/i18n'
 import { withToast } from '../lib/toasts'
-import { appSource, appStatus, dateTime, deploymentVersion, duration, repoName, timeAgo, type Tone } from '../lib/format'
+import { appSource, appStatus, commitSubject, dateTime, deploymentVersion, duration, repoName, timeAgo, type Tone } from '../lib/format'
 
 const ContainerTerminal = lazy(() => import('../components/container-terminal'))
 export const appTabs = ['overview', 'deployments', 'logs', 'terminal', 'domains', 'settings'] as const
@@ -412,7 +413,7 @@ function Deployments(props: {
                       <Badge tone={deployTone[d.status]}>{t.app.deployStatus[d.status]}</Badge>
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm">
-                      {deploymentVersion(d)}
+                      <DeploymentLabel d={d} />
                       {d.status === 'running' && d.phase && <span className="ms-2 text-xs text-warn">{t.app.phase[d.phase]}…</span>}
                       {d.rollback_of && <span className="ms-2 text-xs text-muted">↩ {t.app.rollbackOf}</span>}
                       {d.id === props.currentId && <span className="ms-2 text-xs text-accent">{t.app.live}</span>}
@@ -442,6 +443,35 @@ function Deployments(props: {
         </nav>
       )}
     </Panel>
+  )
+}
+
+/** DeploymentLabel names a deployment in the list: a Git commit by the first line of its
+ * message (the whole message in a tooltip), anything else by its version. */
+function DeploymentLabel({ d }: { d: Deployment }) {
+  const subject = commitSubject(d.commit_message)
+  if (!subject) return <>{deploymentVersion(d)}</>
+  return (
+    <Tooltip.Provider delay={300}>
+      <Tooltip.Root>
+        <Tooltip.Trigger render={<span />}>
+          {subject}
+          <span className="ms-2 font-mono text-xs text-muted" dir="ltr">
+            {d.commit_sha.slice(0, 7)}
+          </span>
+        </Tooltip.Trigger>
+        <Tooltip.Portal>
+          <Tooltip.Positioner side="bottom" align="start" sideOffset={6} className="z-50">
+            <Tooltip.Popup className="max-h-80 max-w-[min(32rem,calc(100vw-2rem))] overflow-auto border border-line bg-raised px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap text-fg shadow-sm [overflow-wrap:anywhere]">
+              {d.commit_message}
+              <span className="mt-2 block font-mono text-muted" dir="ltr">
+                {d.commit_sha}
+              </span>
+            </Tooltip.Popup>
+          </Tooltip.Positioner>
+        </Tooltip.Portal>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   )
 }
 

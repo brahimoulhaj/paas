@@ -55,6 +55,11 @@ type Builder interface {
 	Build(ctx context.Context, src store.GitSource, dir, tag, appID string, line builder.LineFunc) error
 }
 
+// commitMessager is a Builder that can also read the message of the commit it fetched.
+type commitMessager interface {
+	CommitMessage(ctx context.Context, dir string) (string, error)
+}
+
 // GitAuth hands out credentials for private repositories; *gitsource.Service implements it.
 type GitAuth interface {
 	Credentials(ctx context.Context, connectionID, repository string) (builder.Auth, error)
@@ -806,8 +811,20 @@ func (s *Service) build(ctx, final context.Context, app store.App, dep store.Dep
 	if err != nil {
 		return "", err
 	}
-	logw.printf("Commit %s", commit)
-	if err := st.SetDeploymentCommit(final, dep.ID, commit); err != nil {
+	// The message is a nicety: a builder without it, or a failure, leaves it empty.
+	var message string
+	if m, ok := s.opts.Builder.(commitMessager); ok {
+		if message, err = m.CommitMessage(ctx, dir); err != nil {
+			logw.printf("Warning: could not read the commit message: %v", err)
+			message = ""
+		}
+	}
+	if subject, _, _ := strings.Cut(message, "\n"); subject != "" {
+		logw.printf("Commit %s: %s", commit, subject)
+	} else {
+		logw.printf("Commit %s", commit)
+	}
+	if err := st.SetDeploymentCommit(final, dep.ID, commit, message); err != nil {
 		return "", err
 	}
 

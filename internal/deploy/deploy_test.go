@@ -576,6 +576,7 @@ func TestTemporary(t *testing.T) {
 type fakeBuilder struct {
 	mu         sync.Mutex
 	commit     string
+	message    string // the commit's message
 	fetchErr   error
 	fetchFails int // when set, only this many fetches fail with fetchErr
 	failed     int // fetches failed so far
@@ -602,6 +603,12 @@ func (b *fakeBuilder) Fetch(_ context.Context, src store.GitSource, auth builder
 		return "", b.fetchErr
 	}
 	return b.commit, nil
+}
+
+func (b *fakeBuilder) CommitMessage(context.Context, string) (string, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.message, nil
 }
 
 func (b *fakeBuilder) Build(ctx context.Context, src store.GitSource, dir, tag, appID string, line builder.LineFunc) error {
@@ -1230,7 +1237,7 @@ func TestRollbackGit(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.router.known[e.app.ID] = true
-	b := &fakeBuilder{commit: strings.Repeat("a", 40), images: e.ex}
+	b := &fakeBuilder{commit: strings.Repeat("a", 40), message: "First version", images: e.ex}
 	e.useGit(b)
 	first := e.deploy()
 	b.commit = strings.Repeat("b", 40)
@@ -1265,6 +1272,9 @@ func TestRollbackGit(t *testing.T) {
 	}
 	if len(b.tags) != 2 {
 		t.Errorf("built %v: a rollback must not build", b.tags)
+	}
+	if dep.CommitMessage != first.CommitMessage {
+		t.Errorf("rollback message = %q, want %q", dep.CommitMessage, first.CommitMessage)
 	}
 	if got := phaseNames(dep); len(got) == 0 || got[0] != store.PhaseStarting {
 		t.Errorf("phases = %v: a Git rollback starts at %q", got, store.PhaseStarting)
@@ -1382,9 +1392,15 @@ func TestDeployPhases(t *testing.T) {
 
 func TestDeployPhasesGit(t *testing.T) {
 	e := newEnv(t)
-	b := &fakeBuilder{commit: strings.Repeat("cd34", 10)}
+	b := &fakeBuilder{commit: strings.Repeat("cd34", 10), message: "Fix the login page\n\nThe form posted twice."}
 	e.useGit(b)
 	dep := e.deploy()
+	if dep.CommitMessage != b.message {
+		t.Errorf("commit message = %q, want %q", dep.CommitMessage, b.message)
+	}
+	if !strings.Contains(e.log(dep), "Commit "+b.commit+": Fix the login page") {
+		t.Errorf("the log does not name the commit's subject:\n%s", e.log(dep))
+	}
 	want := []string{store.PhaseBuilding, store.PhaseStarting, store.PhaseHealthChecking, store.PhaseSwitching, store.PhaseDraining, store.DeploySucceeded}
 	if got := phaseNames(dep); dep.Status != store.DeploySucceeded || !slices.Equal(got, want) {
 		t.Fatalf("status %q, phases = %v, want %v", dep.Status, got, want)
