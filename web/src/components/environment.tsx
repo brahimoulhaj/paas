@@ -3,7 +3,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api, appQuery, appsQuery, type App } from '../lib/api'
 import { environmentMap, parseEnvironment, serializeEnvironment, type EnvironmentRow } from '../lib/environment'
 import { useT } from '../lib/i18n'
-import { Button, ErrorNote, Field, HelpTip, Panel } from './ui'
+import { Button, ErrorNote, HelpTip, Panel } from './ui'
+
+const inputClass = 'block h-9 w-full border border-line bg-bg px-3 text-sm text-fg placeholder:text-muted/60 focus:border-accent focus:outline-none'
 
 export function EnvironmentSettings({ app }: { app: App }) {
   const t = useT().app
@@ -45,9 +47,14 @@ export function EnvironmentSettings({ app }: { app: App }) {
           <textarea aria-label={t.environmentBulk} dir="ltr" spellCheck={false} value={text} onChange={(e) => { setText(e.target.value); setChanged(true) }} className="min-h-64 w-full resize-y border border-line bg-bg p-3 font-mono text-xs text-fg focus:border-accent focus:outline-none" placeholder={'APP_ENV=production\nPORT=8080'} />
         </> : <>
           {rows.length === 0 && <p className="text-xs text-muted">{t.environmentEmpty}</p>}
-          {rows.map((row, index) => <div key={index} className="grid items-end gap-2 sm:grid-cols-[1fr_2fr_auto]">
-            <Field label={t.environmentKey} name={`env-key-${index}`} dir="ltr" autoComplete="off" value={row.key} onChange={(e) => { setRows(rows.map((r, i) => i === index ? { ...r, key: e.target.value } : r)); setChanged(true) }} />
-            <Field label={t.environmentValue} name={`env-value-${index}`} dir="ltr" autoComplete="off" value={row.value} onChange={(e) => { setRows(rows.map((r, i) => i === index ? { ...r, value: e.target.value } : r)); setChanged(true) }} />
+          {rows.length > 0 && <div aria-hidden className="hidden gap-2 text-xs text-muted sm:grid sm:grid-cols-[1fr_2fr_auto]">
+            <span>{t.environmentKey}</span>
+            <span>{t.environmentValue}</span>
+            <span className="invisible px-4 text-sm">{t.environmentRemove}</span>
+          </div>}
+          {rows.map((row, index) => <div key={index} className="grid items-center gap-2 sm:grid-cols-[1fr_2fr_auto]">
+            <input aria-label={`${t.environmentKey} ${index + 1}`} placeholder={t.environmentKey} name={`env-key-${index}`} dir="ltr" autoComplete="off" spellCheck={false} className={inputClass} value={row.key} onChange={(e) => { setRows(rows.map((r, i) => i === index ? { ...r, key: e.target.value } : r)); setChanged(true) }} />
+            <input aria-label={`${t.environmentValue} ${index + 1}`} placeholder={t.environmentValue} name={`env-value-${index}`} dir="ltr" autoComplete="off" spellCheck={false} className={inputClass} value={row.value} onChange={(e) => { setRows(rows.map((r, i) => i === index ? { ...r, value: e.target.value } : r)); setChanged(true) }} />
             <Button type="button" variant="ghost" onClick={() => { setRows(rows.filter((_, i) => i !== index)); setChanged(true) }}>{t.environmentRemove}</Button>
           </div>)}
           <Button type="button" variant="ghost" onClick={() => { setRows([...rows, { key: '', value: '' }]); setChanged(true) }}>{t.environmentAdd}</Button>
