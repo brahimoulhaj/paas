@@ -9,10 +9,10 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ (nearly done) · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Where we are (2026-11-13, v0.6.0):** M2 is done except pushing builds to a registry, more builders (Nixpacks, Buildpacks, Static), a Gitea token, a build-time env flag and cron. M3 has push/CI webhooks, health checks before the traffic switch, rollback, and the deploy state machine with its timeline; the rolling strategy with a real drain is next. v0.6.0 checked on the VPS (2026-11-14): build caps, resume after restart, deploy keys, private registries, deploy webhooks, Railpack without a Dockerfile, cancel in the browser.
+**Where we are (2026-11-14, v0.8.1):** M2 is done except pushing builds to a registry, more builders (Nixpacks, Buildpacks, Static), a Gitea token, a build-time env flag and cron. M3 has push/CI webhooks, health checks before the traffic switch (v0.8.0), rollback (v0.8.0), the deploy state machine with its timeline (v0.8.0) and the Deployments tab as a paged accordion (v0.8.1); the rolling strategy with a real drain is next. Releases v0.8.0 and v0.8.1 are published but not yet checked on the VPS. v0.6.0 checked on the VPS (2026-11-14): build caps, resume after restart, deploy keys, private registries, deploy webhooks, Railpack without a Dockerfile, cancel in the browser.
 
 **Next up:**
-1. On the VPS (manual), once released: save an HTTP check on an app and deploy (log shows "Health check passed"); set a wrong path or status and deploy (fails after the start period, the old container keeps serving); create a new app and check it gets the TCP check. Roll a Git app back to an earlier commit (no build in the log).
+1. On the VPS (manual), with v0.8.1: save an HTTP check on an app and deploy (log shows "Health check passed"); set a wrong path or status and deploy (fails after the start period, the old container keeps serving); create a new app and check it gets the TCP check. Roll a Git app back to an earlier commit (no build in the log). Watch a deploy's timeline fill in live, and page through the Deployments tab.
 2. Code, M3: rolling strategy with a real drain (default 10 s before the old container goes), then recreate for apps with volumes or host ports (adds the `rolled_back` exit).
 3. Then: push builds to a registry (closes M2), or M4 databases (Postgres, MariaDB, S3 backups).
 4. Check whether "Build log stream on the deployment page" is already covered by the deployment log (Git build output streams there with `|` lines) and tick it if so.
