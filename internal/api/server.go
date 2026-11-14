@@ -130,6 +130,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/apps/{id}/deploy-hook", s.requireAuth(s.handleDeleteDeployHook))
 	mux.HandleFunc("POST /api/hooks/deploy/{token}", s.limit(s.hookRate, s.handleDeployHook))
 
+	mux.HandleFunc("GET /api/deployments/active", s.requireAuth(s.handleActiveDeployments))
 	mux.HandleFunc("GET /api/deployments/{id}", s.requireAuth(s.handleGetDeployment))
 	mux.HandleFunc("POST /api/deployments/{id}/cancel", s.requireAuth(s.handleCancelDeployment))
 	mux.HandleFunc("GET /api/deployments/{id}/log", s.requireAuth(s.handleDeploymentLog))

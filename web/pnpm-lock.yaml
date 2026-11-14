@@ -8,12 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@xterm/xterm':
-        specifier: ^6.0.0
-        version: 6.0.0
-      '@xterm/addon-fit':
-        specifier: ^0.11.0
-        version: 0.11.0
       '@base-ui/react':
         specifier: ^1.9.0
         version: 1.9.0(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -32,6 +26,15 @@ importers:
       '@tanstack/react-router':
         specifier: ^1.170.46
         version: 1.170.46(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      '@xterm/addon-fit':
+        specifier: ^0.11.0
+        version: 0.11.0
+      '@xterm/xterm':
+        specifier: ^6.0.0
+        version: 6.0.0
+      '@yusufceng1z/ding-react':
+        specifier: 0.0.5
+        version: 0.0.5(react@19.3.1)
       react:
         specifier: ^19.3.1
         version: 19.3.1
@@ -62,12 +65,6 @@ importers:
         version: 8.3.7(jiti@2.7.0)
 
 packages:
-
-  '@xterm/xterm@6.0.0':
-    resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
-
-  '@xterm/addon-fit@0.11.0':
-    resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
 
   '@babel/runtime@8.1.0':
     resolution: {integrity: sha512-MQye/pU7gzXerMzlhScFNH1u4Je6rR8cqJWSgAfD+rIwbbtwG8tVDegoI7sWfcXkfVRW09G7vk2vjxGIuKFfwg==}
@@ -504,6 +501,22 @@ packages:
       oxc-transform-react:
         optional: true
 
+  '@xterm/addon-fit@0.11.0':
+    resolution: {integrity: sha512-jYcgT6xtVYhnhgxh3QgYDnnNMYTcf8ElbxxFzX0IZo+vabQqSPAjC3c1wJrKB5E19VwQei89QCiZZP86DCPF7g==}
+
+  '@xterm/xterm@6.0.0':
+    resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
+
+  '@yusufceng1z/ding-react@0.0.5':
+    resolution: {integrity: sha512-pKxMahyFBjGHxTD+LdN2mMVQ1EGSKcYz3DuxRiIw8TBCAkYoklLmsQ6Ee/kiVzv95myC4wYcqJ73Eovw9cBEew==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      react: '>=18'
+
+  '@yusufceng1z/ding@0.0.5':
+    resolution: {integrity: sha512-aj/O+X5Z/X9OQYU9CfEFdWzJo4VhW9zfdazi02uMcE/ElriSmOxe56xHqVBphJ1g0JGxBLEgPX05adGg1zWcFQ==}
+    engines: {node: '>=18'}
+
   cookie-es@3.1.1:
     resolution: {integrity: sha512-UaXxwISYJPTr9hwQxMFYZ7kNhSXboMXP+Z3TRX6f1/NyaGPfuNUZOWP1pUEb75B2HjfklIYLVRfWiFZJyC6Npg==}
 
@@ -731,10 +744,6 @@ packages:
         optional: true
 
 snapshots:
-
-  '@xterm/xterm@6.0.0': {}
-
-  '@xterm/addon-fit@0.11.0': {}
 
   '@babel/runtime@8.1.0': {}
 
@@ -1028,6 +1037,17 @@ snapshots:
     dependencies:
       '@rolldown/pluginutils': 1.1.0
       vite: 8.3.7(jiti@2.7.0)
+
+  '@xterm/addon-fit@0.11.0': {}
+
+  '@xterm/xterm@6.0.0': {}
+
+  '@yusufceng1z/ding-react@0.0.5(react@19.3.1)':
+    dependencies:
+      '@yusufceng1z/ding': 0.0.5
+      react: 19.3.1
+
+  '@yusufceng1z/ding@0.0.5': {}
 
   cookie-es@3.1.1: {}
 

@@ -4,6 +4,10 @@ import { Badge, Button, CheckOption, HelpTip, ErrorNote, Panel, QueryState } fro
 import { api, updatesQuery, type Updates } from '../lib/api'
 import { dateTime, timeAgo } from '../lib/format'
 import { rich, useT } from '../lib/i18n'
+import { rememberUpdated } from '../lib/toasts'
+import { toast } from '@yusufceng1z/ding-react'
+
+const updateToastId = 'panel-update'
 
 /** Panel self-update: what runs, what is available, update now, automatic updates. */
 export function PanelUpdates() {
@@ -28,13 +32,37 @@ function UpdatesBody({ u }: { u: Updates }) {
   const set = (next: Updates) => queryClient.setQueryData(updatesQuery.queryKey, next)
   const [restarting, setRestarting] = useState<string | null>(null) // finished_at of the result before the update
 
-  const check = useMutation({ mutationFn: () => api<Updates>('/updates/check', { method: 'POST' }), onSuccess: set })
+  const check = useMutation({
+    mutationFn: async () => {
+      const id = toast.loading(t.settingsUpdates.checkingToast)
+      try {
+        const next = await api<Updates>('/updates/check', { method: 'POST' })
+        if (next.error) toast.error(t.settingsUpdates.checkFailedToast, { id, description: next.error })
+        else if (next.available) toast.info(t.settingsUpdates.availableToast(next.latest ?? ''), { id })
+        else toast.success(t.settingsUpdates.upToDateToast(next.version), { id })
+        return next
+      } catch (e) {
+        toast.error(t.settingsUpdates.checkFailedToast, { id, description: e instanceof Error ? e.message : String(e) })
+        throw e
+      }
+    },
+    onSuccess: set,
+  })
   const auto = useMutation({
     mutationFn: (on: boolean) => api<Updates>('/updates/settings', { method: 'PUT', body: { auto: on } }),
     onSuccess: set,
   })
   const apply = useMutation({
-    mutationFn: () => api<Updates>('/updates/apply', { method: 'POST' }),
+    mutationFn: async () => {
+      // The toast stays loading through the restart; Restarting turns it into the result.
+      toast.loading(t.settingsUpdates.updatingToast(u.latest ?? ''), { id: updateToastId })
+      try {
+        return await api<Updates>('/updates/apply', { method: 'POST' })
+      } catch (e) {
+        toast.error(t.settingsUpdates.updateFailedToast(u.latest ?? ''), { id: updateToastId, description: e instanceof Error ? e.message : String(e) })
+        throw e
+      }
+    },
     onSuccess: (next) => {
       set(next)
       setRestarting(u.last_result?.finished_at ?? '')
@@ -103,11 +131,6 @@ function UpdatesBody({ u }: { u: Updates }) {
           </Button>
         </div>
       )}
-      {apply.error && (
-        <div className="border-b border-line p-4">
-          <ErrorNote>{apply.error.message}</ErrorNote>
-        </div>
-      )}
 
       <div className="p-4"><CheckOption checked={u.auto} disabled={auto.isPending} onChange={(on) => auto.mutate(on)} label={t.settingsUpdates.auto} hint={t.settingsUpdates.autoHint} /></div>
       {auto.error && (
@@ -151,8 +174,14 @@ function Restarting({ before, target }: { before: string; target: string }) {
       try {
         const u = await api<Updates>('/updates')
         if (u.last_result && u.last_result.finished_at !== before) {
-          setResult(u.last_result)
-          if (u.last_result.ok) location.reload()
+          const r = u.last_result
+          setResult(r)
+          if (r.ok) {
+            rememberUpdated(r.to)
+            location.reload()
+          } else {
+            toast.error(t.settingsUpdates.updateFailedToast(r.to), { id: updateToastId, description: r.error ?? undefined })
+          }
           return
         }
       } catch {
@@ -165,7 +194,7 @@ function Restarting({ before, target }: { before: string; target: string }) {
       stopped = true
       window.clearTimeout(timer.current)
     }
-  }, [before])
+  }, [before, t])
 
   if (result && !result.ok) {
     return (

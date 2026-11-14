@@ -656,6 +656,36 @@ func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, mapSlice(list, toDeploymentJSON))
 }
 
+// activeDeploymentJSON is a queued or running deployment with what the overview needs to
+// name it and link to its app.
+type activeDeploymentJSON struct {
+	deploymentJSON
+	AppName   string `json:"app_name"`
+	ProjectID string `json:"project_id"`
+}
+
+// handleActiveDeployments lists the deployments queued or running across all apps, oldest first.
+func (s *Server) handleActiveDeployments(w http.ResponseWriter, r *http.Request) {
+	list, err := s.store.ListUnfinishedDeployments(r.Context())
+	if err != nil {
+		s.internal(w, "list active deployments", err)
+		return
+	}
+	out := make([]activeDeploymentJSON, 0, len(list))
+	for _, d := range list {
+		a, err := s.store.GetApp(r.Context(), d.AppID)
+		if errors.Is(err, store.ErrNotFound) {
+			continue // the app went away between the two reads
+		}
+		if err != nil {
+			s.internal(w, "get app", err)
+			return
+		}
+		out = append(out, activeDeploymentJSON{toDeploymentJSON(d), a.Name, a.ProjectID})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (s *Server) handleGetDeployment(w http.ResponseWriter, r *http.Request) {
 	d, err := s.store.GetDeployment(r.Context(), r.PathValue("id"))
 	if s.storeError(w, "get deployment", err, "") {

@@ -8,6 +8,16 @@ export const en = {
   createFirst: 'Create your first project',
   recentActivity: 'Recent activity',
   allActivity: 'All activity →',
+  deployingApp: (app: string) => `Deploying ${app}`,
+  queuedApp: (app: string) => `${app} is waiting to deploy`,
+  queuedFor: (ago: string) => `queued ${ago}`,
+  runningFor: (d: string) => `running for ${d}`,
+  viewDeployment: 'View',
+  deployedApp: (app: string) => `${app} deployed`,
+  failedApp: (app: string) => `${app} failed to deploy`,
+  cancelledApp: (app: string) => `${app} deployment cancelled`,
+  toasts: 'Notifications',
+  dismiss: 'Dismiss',
 }
 
 export const fr: typeof en = {
@@ -18,6 +28,16 @@ export const fr: typeof en = {
   createFirst: 'Créer votre premier projet',
   recentActivity: 'Activité récente',
   allActivity: "Toute l'activité →",
+  deployingApp: (app) => `Déploiement de ${app} en cours`,
+  queuedApp: (app) => `${app} attend son déploiement`,
+  queuedFor: (ago) => `en attente · ${ago}`,
+  runningFor: (d) => `en cours depuis ${d}`,
+  viewDeployment: 'Voir',
+  deployedApp: (app) => `${app} déployé`,
+  failedApp: (app) => `Échec du déploiement de ${app}`,
+  cancelledApp: (app) => `Déploiement de ${app} annulé`,
+  toasts: 'Notifications',
+  dismiss: 'Fermer',
 }
 
 export const ar: typeof en = {
@@ -28,6 +48,16 @@ export const ar: typeof en = {
   createFirst: 'أنشئ مشروعك الأول',
   recentActivity: 'النشاط الأخير',
   allActivity: 'كل النشاط ←',
+  deployingApp: (app) => `جارٍ نشر ${app}`,
+  queuedApp: (app) => `${app} في انتظار النشر`,
+  queuedFor: (ago) => `في الانتظار · ${ago}`,
+  runningFor: (d) => `جارٍ منذ ${d}`,
+  viewDeployment: 'عرض',
+  deployedApp: (app) => `تم نشر ${app}`,
+  failedApp: (app) => `فشل نشر ${app}`,
+  cancelledApp: (app) => `أُلغي نشر ${app}`,
+  toasts: 'الإشعارات',
+  dismiss: 'إغلاق',
 }
 
 export const es: typeof en = {
@@ -38,4 +68,14 @@ export const es: typeof en = {
   createFirst: 'Crea tu primer proyecto',
   recentActivity: 'Actividad reciente',
   allActivity: 'Toda la actividad →',
+  deployingApp: (app) => `Desplegando ${app}`,
+  queuedApp: (app) => `${app} espera su despliegue`,
+  queuedFor: (ago) => `en cola · ${ago}`,
+  runningFor: (d) => `en curso desde hace ${d}`,
+  viewDeployment: 'Ver',
+  deployedApp: (app) => `${app} desplegado`,
+  failedApp: (app) => `Falló el despliegue de ${app}`,
+  cancelledApp: (app) => `Despliegue de ${app} cancelado`,
+  toasts: 'Notificaciones',
+  dismiss: 'Cerrar',
 }

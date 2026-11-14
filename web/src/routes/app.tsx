@@ -23,6 +23,7 @@ import {
 } from '../lib/api'
 import { SourceFields, sourceChanged, sourceForm, sourceInput } from '../components/source'
 import { rich, useT } from '../lib/i18n'
+import { withToast } from '../lib/toasts'
 import { appSource, appStatus, dateTime, deploymentVersion, duration, repoName, timeAgo, type Tone } from '../lib/format'
 
 const ContainerTerminal = lazy(() => import('../components/container-terminal'))
@@ -71,7 +72,15 @@ export function AppPage() {
     },
   })
   const action = useMutation({
-    mutationFn: (name: 'start' | 'stop' | 'restart') => api<App>(`/apps/${appId}/${name}`, { method: 'POST' }),
+    mutationFn: (name: 'start' | 'stop' | 'restart') => {
+      const label = app.data?.name ?? ''
+      const m = t.app.actionToast[name]
+      return withToast(() => api<App>(`/apps/${appId}/${name}`, { method: 'POST' }), {
+        loading: m.run(label),
+        success: m.done(label),
+        error: m.fail(label),
+      })
+    },
     onSuccess: (a) => queryClient.setQueryData(appQuery(appId).queryKey, a),
   })
 
@@ -93,7 +102,7 @@ export function AppPage() {
   const status = appStatus(a, deploying)
   const deployed = !!a.current_deployment_id
   const busy = deploying || deploy.isPending || action.isPending
-  const actionError = deploy.error ?? action.error
+  const actionError = deploy.error
 
   return (
     <div className="space-y-6">

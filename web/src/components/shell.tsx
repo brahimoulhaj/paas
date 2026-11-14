@@ -6,6 +6,7 @@ import { useT } from '../lib/i18n'
 import { useTheme } from '../lib/theme'
 import { LanguagePicker } from './langpicker'
 import { ThemePicker } from './themepicker'
+import { DeployToasts } from './deploy-toasts'
 import { Badge, cx } from './ui'
 
 // Sections light up as their milestone lands; until then they show as "soon".
@@ -97,6 +98,7 @@ export function Shell() {
           <Outlet />
         </main>
       </div>
+      <DeployToasts />
       {picking && <ThemePicker brand={meta.name} onClose={() => setPicking(false)} />}
     </div>
   )

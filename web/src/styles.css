@@ -57,3 +57,14 @@ body {
   outline: 1px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* Deployment toasts (ding): square and in the panel's font. Colors stay ding's own, in the
+   theme opposite to the panel's, so a toast stands out from the page. */
+.tst-viewport {
+  --tst-radius: 0px;
+  font-family: var(--font-mono);
+}
+.tst-viewport .tst-action,
+.tst-viewport .tst-close {
+  border-radius: 0;
+}

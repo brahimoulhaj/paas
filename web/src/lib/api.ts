@@ -242,6 +242,14 @@ export const deploymentsQuery = (appId: string) => ({
   queryFn: () => api<Deployment[]>(`/apps/${appId}/deployments`),
 })
 
+/** A queued or running deployment, with what is needed to name it and link to its app. */
+export type ActiveDeployment = Deployment & { app_name: string; project_id: string }
+
+export const activeDeploymentsQuery = {
+  queryKey: ['deployments', 'active'] as const,
+  queryFn: () => api<ActiveDeployment[]>('/deployments/active'),
+}
+
 export const domainsQuery = (appId: string) => ({
   queryKey: ['apps', appId, 'domains'] as const,
   queryFn: () => api<Domain[]>(`/apps/${appId}/domains`),

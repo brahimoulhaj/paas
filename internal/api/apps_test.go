@@ -235,12 +235,18 @@ func TestDeployBusy(t *testing.T) {
 	pid := e.must(201, "POST", "/api/projects", map[string]any{"name": "Shop"})["id"].(string)
 	id := e.must(201, "POST", "/api/projects/"+pid+"/apps", map[string]any{"name": "web", "image": "nginx:1", "port": 80})["id"].(string)
 	e.ex.PullDelay = 200_000_000 // 200 ms
-	e.must(202, "POST", "/api/apps/"+id+"/deploy", nil)
+	depID := e.must(202, "POST", "/api/apps/"+id+"/deploy", nil)["id"].(string)
+	if got := e.list("/api/deployments/active"); len(got) != 1 || got[0]["id"] != depID || got[0]["app_name"] != "web" || got[0]["project_id"] != pid {
+		t.Fatalf("active deployments = %v", got)
+	}
 	if m := e.must(409, "POST", "/api/apps/"+id+"/deploy", nil); m["error"].(map[string]any)["code"] != "busy" {
 		t.Errorf("second deploy = %v", m)
 	}
 	e.must(409, "DELETE", "/api/apps/"+id, nil)
 	e.deployer.Wait()
+	if got := e.list("/api/deployments/active"); len(got) != 0 {
+		t.Fatalf("active deployments after finish = %v", got)
+	}
 }
 
 func TestDomainsAPI(t *testing.T) {
