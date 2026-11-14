@@ -32,6 +32,10 @@ type Deployer interface {
 	Remove(ctx context.Context, appID string) error
 	// Cancel stops an unfinished deployment before it switches traffic.
 	Cancel(deploymentID string) error
+	// Rollback deploys an earlier deployment's image again, without a build.
+	Rollback(ctx context.Context, deploymentID string) (store.Deployment, error)
+	// RollbackTargets tells which of an app's deployments a rollback can return to.
+	RollbackTargets(ctx context.Context, app store.App, deps []store.Deployment) (map[string]bool, error)
 	RuntimeState(ctx context.Context, appID string) string
 	LogPath(dep store.Deployment) string
 	// StreamLogs calls fn for each line of the app's current container until the stream
@@ -116,16 +120,27 @@ type deploymentJSON struct {
 	Port          int        `json:"port"`
 	ContainerName string     `json:"container_name"`
 	Error         string     `json:"error"`
-	Attempts      int        `json:"attempts"` // starts; above 1 when a panel restart interrupted it
+	Attempts      int        `json:"attempts"`                // starts; above 1 when a panel restart interrupted it
+	RollbackOf    string     `json:"rollback_of"`             // a rollback: the deployment returned to
+	CanRollBack   bool       `json:"can_roll_back,omitempty"` // in an app's list: a rollback can return to it
+	Phase         string     `json:"phase"`                   // the step it is in, or ended in
 	StartedAt     *time.Time `json:"started_at"`
 	FinishedAt    *time.Time `json:"finished_at"`
 	CreatedAt     time.Time  `json:"created_at"`
+
+	// Phases is the timeline: each step entered and when, then the final status. A step
+	// lasts until the next entry; the last step of a running deployment, until now.
+	Phases []store.PhaseEntry `json:"phases"`
 }
 
 func toDeploymentJSON(d store.Deployment) deploymentJSON {
 	out := deploymentJSON{
 		ID: d.ID, AppID: d.AppID, Status: d.Status, Trigger: d.Trigger, Image: d.Image, CommitSHA: d.CommitSHA, Port: d.Port,
-		ContainerName: d.ContainerName, Error: d.Error, Attempts: d.Attempts, CreatedAt: d.CreatedAt,
+		ContainerName: d.ContainerName, Error: d.Error, Attempts: d.Attempts, RollbackOf: d.RollbackOf, CreatedAt: d.CreatedAt,
+		Phase: d.Phase, Phases: d.Phases,
+	}
+	if out.Phases == nil {
+		out.Phases = []store.PhaseEntry{}
 	}
 	if !d.StartedAt.IsZero() {
 		out.StartedAt = &d.StartedAt
@@ -579,6 +594,8 @@ func (s *Server) deployError(w http.ResponseWriter, what string, err error) bool
 		writeError(w, http.StatusConflict, "busy", err.Error())
 	case errors.Is(err, deploy.ErrNotCancellable):
 		writeError(w, http.StatusConflict, "not_cancellable", err.Error())
+	case errors.Is(err, deploy.ErrNoRollback):
+		writeError(w, http.StatusConflict, "no_rollback", err.Error())
 	case errors.Is(err, deploy.ErrNotDeployed):
 		writeError(w, http.StatusConflict, "not_deployed", "deploy the app first")
 	default:
@@ -657,7 +674,44 @@ func (s *Server) handleListDeployments(w http.ResponseWriter, r *http.Request) {
 		s.internal(w, "list deployments", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, mapSlice(list, toDeploymentJSON))
+	out := mapSlice(list, toDeploymentJSON)
+	if s.deployer != nil {
+		// Without the container host the list still shows; rollbacks are just not offered.
+		targets, err := s.deployer.RollbackTargets(r.Context(), a, list)
+		if err != nil {
+			s.log.Warn("rollback targets", "app", a.ID, "error", err)
+		}
+		for i := range out {
+			out[i].CanRollBack = targets[out[i].ID]
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handleRollback deploys the image of an earlier deployment again and answers 202 with
+// the new, queued deployment.
+func (s *Server) handleRollback(w http.ResponseWriter, r *http.Request) {
+	if !s.requireDeployer(w) {
+		return
+	}
+	src, err := s.store.GetDeployment(r.Context(), r.PathValue("id"))
+	if s.storeError(w, "get deployment", err, "") {
+		return
+	}
+	a, err := s.store.GetApp(r.Context(), src.AppID)
+	if s.storeError(w, "get app", err, "") {
+		return
+	}
+	dep, err := s.deployer.Rollback(r.Context(), src.ID)
+	if s.deployError(w, "rollback", err) {
+		return
+	}
+	detail := src.Image
+	if src.CommitSHA != "" {
+		detail = src.CommitSHA
+	}
+	s.audit(r, "app.rollback", "app", a.ID, a.Name, detail)
+	writeJSON(w, http.StatusAccepted, toDeploymentJSON(dep))
 }
 
 // activeDeploymentJSON is a queued or running deployment with what the overview needs to

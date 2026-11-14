@@ -152,6 +152,10 @@ export type App = {
   updated_at: string
 }
 
+/** The steps of a running deployment, in order. A Git build is building, an image pull is pulling. */
+export const deploymentPhases = ['pulling', 'building', 'starting', 'health_checking', 'switching', 'draining'] as const
+export type DeploymentPhase = (typeof deploymentPhases)[number]
+
 export type Deployment = {
   id: string
   app_id: string
@@ -166,6 +170,14 @@ export type Deployment = {
   error: string
   /** How many times it has started; above 1 when a panel restart interrupted it. */
   attempts: number
+  /** A rollback: the deployment whose image it deploys again; '' otherwise. */
+  rollback_of: string
+  /** In an app's list: a rollback can return to this deployment. */
+  can_roll_back?: boolean
+  /** The step it is in, or ended in; '' before the first. */
+  phase: DeploymentPhase | ''
+  /** The timeline: each step entered and when, then the final status. A step lasts until the next entry. */
+  phases: { phase: DeploymentPhase | Deployment['status']; at: string }[]
   started_at: string | null
   finished_at: string | null
   created_at: string

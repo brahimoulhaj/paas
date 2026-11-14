@@ -478,3 +478,31 @@ func TestAppEnvironment(t *testing.T) {
 		}
 	}
 }
+
+func TestDeploymentPhasesAPI(t *testing.T) {
+	e := newEnv(t)
+	e.signIn()
+	pid := e.must(201, "POST", "/api/projects", map[string]any{"name": "Shop"})["id"].(string)
+	id := e.must(201, "POST", "/api/projects/"+pid+"/apps", map[string]any{"name": "web", "image": "nginx:1", "port": 80})["id"].(string)
+	queued := e.must(202, "POST", "/api/apps/"+id+"/deploy", nil)
+	if ps, ok := queued["phases"].([]any); !ok {
+		t.Errorf("queued phases = %v, want an array", queued["phases"])
+	} else if len(ps) > 0 && queued["status"] == "queued" {
+		t.Errorf("queued deployment has phases %v", ps)
+	}
+	e.deployer.Wait()
+	d := e.must(200, "GET", "/api/deployments/"+queued["id"].(string), nil)
+	ps, _ := d["phases"].([]any)
+	var names []string
+	for _, p := range ps {
+		m := p.(map[string]any)
+		if m["at"] == "" || m["at"] == nil {
+			t.Errorf("phase without a time: %v", m)
+		}
+		names = append(names, m["phase"].(string))
+	}
+	want := []string{"pulling", "starting", "health_checking", "switching", "draining", "succeeded"}
+	if d["phase"] != "draining" || strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Errorf("phase %v, phases %v, want draining and %v", d["phase"], names, want)
+	}
+}

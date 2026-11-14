@@ -1,7 +1,8 @@
 // Package deploy turns an app's settings into a running container and keeps the proxy
-// pointed at it. This is the minimal pipeline: pull (or, for a Git app, fetch and build),
-// start, wait for the health check, switch the route, remove the old container. Draining
-// and rollback build on it later.
+// pointed at it. A deployment is a state machine: queued → pulling (or, for a Git app,
+// building) → starting → health_checking → switching → draining → succeeded, leaving
+// for failed or cancelled at any step before switching. Each step entered is recorded
+// with its time (store.EnterDeploymentPhase), for the timeline.
 package deploy
 
 import (
@@ -31,6 +32,9 @@ var (
 	ErrNotDeployed = errors.New("the app has not been deployed yet")
 	// ErrNotCancellable means the deployment has finished, or is already switching traffic.
 	ErrNotCancellable = errors.New("the deployment can no longer be cancelled")
+	// ErrNoRollback means the deployment cannot be returned to: it did not succeed, it is
+	// the live one, or its built image was pruned.
+	ErrNoRollback = errors.New("this deployment cannot be rolled back to")
 
 	errCancelled = errors.New("cancelled")
 )
@@ -252,6 +256,9 @@ func (s *Service) Recover(ctx context.Context) (Recovery, error) {
 		if dep.Status == store.DeployRunning && app.CurrentDeploymentID == dep.ID {
 			// Traffic had switched to the new container; only the cleanup was left.
 			logw.printf("The panel restarted after switching traffic; finishing")
+			if err := st.EnterDeploymentPhase(ctx, dep.ID, store.PhaseDraining); err != nil {
+				s.opts.Log.Error("record deployment phase", "deployment", dep.ID, "error", err)
+			}
 			s.removeOthers(ctx, app, dep.ContainerID, logw)
 			logw.printf("Deployment succeeded")
 			logw.close()
@@ -305,15 +312,87 @@ func (s *Service) Deploy(ctx context.Context, appID, trigger string) (store.Depl
 	if !s.acquire(appID) {
 		return store.Deployment{}, ErrBusy
 	}
-	dep, err := s.opts.Store.CreateDeployment(ctx, appID, trigger, app.Image, app.Port, func(id string) string {
-		return filepath.Join("deployments", appID, id+".log")
-	})
+	dep, err := s.opts.Store.CreateDeployment(ctx, appID, trigger, app.Image, app.Port, logPath(appID))
 	if err != nil {
 		s.release(appID)
 		return store.Deployment{}, err
 	}
 	s.start(app, dep, nil)
 	return dep, nil
+}
+
+func logPath(appID string) func(deploymentID string) string {
+	return func(id string) string { return filepath.Join("deployments", appID, id+".log") }
+}
+
+// Rollback deploys the image of an earlier deployment again, through the same pipeline
+// (start, health check, switch) but without a build. A Git app can return to the images
+// still kept (KeepImages); an image app pulls the image again. The returned record is
+// queued, like Deploy's.
+func (s *Service) Rollback(ctx context.Context, deploymentID string) (store.Deployment, error) {
+	src, err := s.opts.Store.GetDeployment(ctx, deploymentID)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	app, err := s.opts.Store.GetApp(ctx, src.AppID)
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	targets, err := s.RollbackTargets(ctx, app, []store.Deployment{src})
+	if err != nil {
+		return store.Deployment{}, err
+	}
+	if !targets[src.ID] {
+		return store.Deployment{}, ErrNoRollback
+	}
+	if !s.acquire(app.ID) {
+		return store.Deployment{}, ErrBusy
+	}
+	dep, err := s.opts.Store.CreateRollbackDeployment(ctx, src, logPath(app.ID))
+	if err != nil {
+		s.release(app.ID)
+		return store.Deployment{}, err
+	}
+	s.start(app, dep, nil)
+	return dep, nil
+}
+
+// RollbackTargets tells which of deps (deployments of app) a rollback can return to: the
+// succeeded ones whose image is not the live one, and for a Git app only those whose image
+// is still kept.
+func (s *Service) RollbackTargets(ctx context.Context, app store.App, deps []store.Deployment) (map[string]bool, error) {
+	var kept map[string]bool
+	if app.SourceType == store.SourceGit {
+		images, err := s.opts.Executor.ListBuildImages(ctx, app.ID)
+		if err != nil {
+			return nil, err
+		}
+		kept = map[string]bool{}
+		for _, img := range images {
+			for _, tag := range img.Tags {
+				kept[tag] = true
+			}
+		}
+	}
+	live := ""
+	if app.CurrentDeploymentID != "" {
+		cur, err := s.opts.Store.GetDeployment(ctx, app.CurrentDeploymentID)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		live = cur.Image
+	}
+	out := map[string]bool{}
+	for _, d := range deps {
+		ok := d.AppID == app.ID && d.Status == store.DeploySucceeded && d.Image != "" && d.ID != app.CurrentDeploymentID && d.Image != live
+		if ok && kept != nil {
+			ok = kept[d.Image]
+		}
+		if ok {
+			out[d.ID] = true
+		}
+	}
+	return out, nil
 }
 
 // start runs dep in the background, once ready is closed (nil: at once). The caller holds
@@ -390,10 +469,19 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 		s.opts.Log.Warn("deployment "+status, "app", app.Name, "deployment", dep.ID, "error", msg)
 	}
 
+	// phase records the step the deployment enters. The timeline is bookkeeping: a failed
+	// write is logged, not fatal.
+	phase := func(p string) {
+		if err := st.EnterDeploymentPhase(final, dep.ID, p); err != nil {
+			s.opts.Log.Error("record deployment phase", "deployment", dep.ID, "phase", p, "error", err)
+		}
+	}
+
 	buildDone := func() {}
 	// A build waits, still queued, for a free build slot; the slot is held until the image
 	// exists. Pulls need none.
-	if app.SourceType == store.SourceGit {
+	rollback := dep.RollbackOf != ""
+	if app.SourceType == store.SourceGit && !rollback {
 		select {
 		case s.builds <- struct{}{}:
 		default:
@@ -420,9 +508,22 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 		fail("", err)
 		return
 	}
-	// 1. Pull the image, or build it from Git.
+	// 1. Pull the image, or build it from Git. A rollback reuses the earlier image: a Git
+	// app's is still on the server, an image app's is pulled again.
 	image := app.Image
-	if app.SourceType == store.SourceGit {
+	if rollback {
+		image = dep.Image
+		version := image
+		if dep.CommitSHA != "" {
+			version = fmt.Sprintf("commit %s, image %s", dep.CommitSHA, image)
+		}
+		logw.printf("Rolling back %s to deployment %s (%s), without a build", app.Name, dep.RollbackOf, version)
+	}
+	switch {
+	case rollback && app.SourceType == store.SourceGit:
+		// Nothing to fetch: the image is still on the server.
+	case app.SourceType == store.SourceGit:
+		phase(store.PhaseBuilding)
 		logw.printf("Deploying %s from %s (branch %s)", app.Name, app.Git.Repository, app.Git.Branch)
 		var err error
 		image, err = s.build(ctx, final, app, dep, logw)
@@ -431,8 +532,11 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 			fail("", err)
 			return
 		}
-	} else {
-		logw.printf("Deploying %s (image %s)", app.Name, app.Image)
+	default:
+		phase(store.PhasePulling)
+		if !rollback {
+			logw.printf("Deploying %s (image %s)", app.Name, app.Image)
+		}
 		auth, err := s.registryAuth(ctx, app, image)
 		if err != nil {
 			fail("", err)
@@ -445,6 +549,7 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 	}
 
 	// 2. Create and start the new container next to the old one.
+	phase(store.PhaseStarting)
 	mounts, err := s.prepareMounts(app, dep)
 	if err != nil {
 		fail("", err)
@@ -464,7 +569,7 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 		Labels:     map[string]string{"deployment": dep.ID},
 		CPUs:       app.CPULimit,
 		MemoryMB:   app.MemoryMB,
-		Env:        containerEnv(app),
+		Env:        containerEnv(app, dep.Port),
 		Entrypoint: entrypoint,
 		Command:    command,
 		Mounts:     mounts,
@@ -490,6 +595,7 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 	if !saved {
 		check = store.HealthCheck{Type: store.HealthRunning}
 	}
+	phase(store.PhaseHealthChecking)
 	if err := s.waitHealthy(ctx, check, containerID, name, dep.Port, logw); err != nil {
 		fail(containerID, err)
 		return
@@ -501,6 +607,7 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 		fail(containerID, ctx.Err())
 		return
 	}
+	phase(store.PhaseSwitching)
 	previous := app.CurrentDeploymentID
 	if err := st.SetAppCurrentDeployment(final, app.ID, dep.ID, store.StateRunning); err != nil {
 		fail(containerID, err)
@@ -517,9 +624,20 @@ func (s *Service) run(ctx context.Context, app store.App, dep store.Deployment) 
 	}
 
 	// 4. Remove every other container of this app. From here the deploy has succeeded.
+	phase(store.PhaseDraining)
 	s.removeOthers(final, app, containerID, logw)
 
 	s.pruneImages(final, app.ID, image, logw)
+
+	// An image app now runs the rolled-back image: its settings say so, so a redeploy does
+	// not quietly return to the image it left.
+	if rollback && app.SourceType == store.SourceImage && app.Image != image {
+		if err := st.SetAppImage(final, app.ID, image); err != nil {
+			logw.printf("Warning: could not set the app's image to %s: %v", image, err)
+		} else {
+			logw.printf("The app's image is now %s", image)
+		}
+	}
 
 	// The last log line goes in before the status changes: a log stream stops reading
 	// once it sees a finished status, and must have the whole file by then.
@@ -705,9 +823,9 @@ func (s *Service) build(ctx, final context.Context, app store.App, dep store.Dep
 	return tag, nil
 }
 
-// containerEnv is the app's environment, plus PORT set to the app's port for a Git app
-// that does not set it: images built by Railpack (and many others) listen on $PORT.
-func containerEnv(app store.App) map[string]string {
+// containerEnv is the app's environment, plus PORT set to port (the deployment's) for a
+// Git app that does not set it: images built by Railpack (and many others) listen on $PORT.
+func containerEnv(app store.App, port int) map[string]string {
 	if app.SourceType != store.SourceGit {
 		return app.Environment
 	}
@@ -718,7 +836,7 @@ func containerEnv(app store.App) map[string]string {
 	for k, v := range app.Environment {
 		env[k] = v
 	}
-	env["PORT"] = strconv.Itoa(app.Port)
+	env["PORT"] = strconv.Itoa(port)
 	return env
 }
 

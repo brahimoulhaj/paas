@@ -155,19 +155,28 @@ export function QueryState(props: { loading: boolean; error: Error | null; what:
 }
 
 /** A destructive button that asks once more before it acts. */
-export function ConfirmButton(props: { label: string; confirm: string; onConfirm: () => void; disabled?: boolean; pending?: boolean }) {
+export function ConfirmButton(props: {
+  label: string
+  confirm: string
+  onConfirm: () => void
+  disabled?: boolean
+  pending?: boolean
+  /** ghost for actions that are not destructive; the confirmation is then primary. */
+  variant?: 'danger' | 'ghost'
+}) {
   const [armed, setArmed] = useState(false)
   const t = useT()
+  const ghost = props.variant === 'ghost'
   if (!armed) {
     return (
-      <Button variant="danger" type="button" disabled={props.disabled} onClick={() => setArmed(true)}>
+      <Button variant={ghost ? 'ghost' : 'danger'} type="button" disabled={props.disabled} onClick={() => setArmed(true)}>
         {props.label}
       </Button>
     )
   }
   return (
     <span className="inline-flex flex-wrap items-center gap-2">
-      <Button variant="danger" type="button" disabled={props.pending} onClick={props.onConfirm}>
+      <Button variant={ghost ? 'primary' : 'danger'} type="button" disabled={props.pending} onClick={props.onConfirm}>
         {props.pending ? t.common.working : props.confirm}
       </Button>
       <Button variant="ghost" type="button" disabled={props.pending} onClick={() => setArmed(false)}>

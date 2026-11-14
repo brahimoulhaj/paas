@@ -5,6 +5,7 @@ import { Link, useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { DnsHintText } from '../components/dns'
 import { DeployHookPanel } from '../components/deploy-hook'
+import { DeploymentTimeline } from '../components/deployment-timeline'
 import { HealthCheckPanel } from '../components/health-check'
 import { LogViewer } from '../components/logviewer'
 import { Badge, Button, ConfirmButton, cx, Empty, ErrorNote, Field, HelpTip, HttpOnlyChoice, PageHeader, Panel, QueryState } from '../components/ui'
@@ -185,6 +186,7 @@ export function AppPage() {
           currentId={a.current_deployment_id}
           selected={selected ?? latest?.id ?? null}
           onSelect={setSelected}
+          git={a.source_type === 'git'}
         />
       )}
       {tab === 'logs' && <RuntimeLogs app={a} />}
@@ -350,9 +352,11 @@ function Deployments(props: {
   currentId: string
   selected: string | null
   onSelect: (id: string) => void
+  git: boolean
 }) {
   const t = useT()
   const selected = props.list?.find((d) => d.id === props.selected)
+  const busy = !!props.list?.some(isActive)
   return (
     <div className="space-y-6">
       <Panel title={t.app.tabs.deployments}>
@@ -378,6 +382,8 @@ function Deployments(props: {
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm">
                       {deploymentVersion(d)}
+                      {d.status === 'running' && d.phase && <span className="ms-2 text-xs text-warn">{t.app.phase[d.phase]}…</span>}
+                      {d.rollback_of && <span className="ms-2 text-xs text-muted">↩ {t.app.rollbackOf}</span>}
                       {d.id === props.currentId && <span className="ms-2 text-xs text-accent">{t.app.live}</span>}
                     </span>
                     <span className="w-full shrink-0 text-xs text-muted sm:w-auto" title={dateTime(d.created_at)}>
@@ -389,17 +395,28 @@ function Deployments(props: {
             </ul>
           ))}
       </Panel>
-      {selected && <DeploymentLog deployment={selected} />}
+      {selected && <DeploymentLog deployment={selected} busy={busy} git={props.git} onRolledBack={props.onSelect} />}
     </div>
   )
 }
 
-function DeploymentLog({ deployment }: { deployment: Deployment }) {
+function DeploymentLog(props: { deployment: Deployment; busy: boolean; git: boolean; onRolledBack: (id: string) => void }) {
+  const { deployment } = props
   const t = useT()
   const queryClient = useQueryClient()
+  const list = deploymentsQuery(deployment.app_id).queryKey
   const cancel = useMutation({
     mutationFn: () => api<Deployment>(`/deployments/${deployment.id}/cancel`, { method: 'POST' }),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: deploymentsQuery(deployment.app_id).queryKey }),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: list }),
+  })
+  // The rollback is a new deployment: it goes on top of the list and its log opens.
+  const rollback = useMutation({
+    mutationFn: () => api<Deployment>(`/deployments/${deployment.id}/rollback`, { method: 'POST' }),
+    onSuccess: (d) => {
+      queryClient.setQueryData<Deployment[]>(list, (old) => [d, ...(old ?? [])])
+      props.onRolledBack(d.id)
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: list }),
   })
   return (
     <Panel
@@ -417,11 +434,29 @@ function DeploymentLog({ deployment }: { deployment: Deployment }) {
               {t.app.cancelDeployment}
             </Button>
           )}
+          {deployment.can_roll_back && (
+            <ConfirmButton
+              variant="ghost"
+              label={t.app.rollBack}
+              confirm={t.app.rollBackConfirm}
+              disabled={props.busy}
+              pending={rollback.isPending}
+              onConfirm={() => rollback.mutate()}
+            />
+          )}
           <Badge tone={deployTone[deployment.status]}>{t.app.deployStatus[deployment.status]}</Badge>
         </div>
       }
     >
+      {deployment.can_roll_back && (
+        <p className="border-b border-line px-4 py-2 text-xs text-muted">
+          {t.app.rollBackHint}
+          {props.git && ` ${t.app.rollBackGitNote}`}
+        </p>
+      )}
+      <DeploymentTimeline deployment={deployment} />
       {cancel.error && <p className="border-b border-line px-4 py-2 text-xs text-danger">{cancel.error.message}</p>}
+      {rollback.error && <p className="border-b border-line px-4 py-2 text-xs text-danger">{rollback.error.message}</p>}
       {deployment.error && (
         <p className={cx('border-b border-line px-4 py-2 text-xs', deployment.status === 'cancelled' ? 'text-muted' : 'text-danger')}>
           {deployment.error}

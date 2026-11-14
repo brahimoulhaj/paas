@@ -849,18 +849,18 @@ func TestDeployPrunesBuildImages(t *testing.T) {
 
 func TestContainerEnvPort(t *testing.T) {
 	img := store.App{SourceType: store.SourceImage, Port: 80, Environment: map[string]string{"A": "1"}}
-	if env := containerEnv(img); len(env) != 1 {
+	if env := containerEnv(img, 80); len(env) != 1 {
 		t.Errorf("image app env = %v, want untouched", env)
 	}
 	git := store.App{SourceType: store.SourceGit, Port: 8080, Environment: map[string]string{"A": "1"}}
-	if env := containerEnv(git); env["PORT"] != "8080" || env["A"] != "1" {
+	if env := containerEnv(git, 8080); env["PORT"] != "8080" || env["A"] != "1" {
 		t.Errorf("git app env = %v, want PORT=8080 added", env)
 	}
 	if _, ok := git.Environment["PORT"]; ok {
 		t.Error("containerEnv changed the app's own map")
 	}
 	git.Environment["PORT"] = "3000"
-	if env := containerEnv(git); env["PORT"] != "3000" {
+	if env := containerEnv(git, 8080); env["PORT"] != "3000" {
 		t.Errorf("user PORT overridden: %v", env)
 	}
 }
@@ -1221,5 +1221,172 @@ func TestHealthCheckOutsideNetwork(t *testing.T) {
 	raw, _ := os.ReadFile(e.svc.LogPath(dep))
 	if dep.Status != store.DeploySucceeded || !strings.Contains(string(raw), "Health check: skipped, the panel runs outside Docker") {
 		t.Fatalf("deployment = %+v\n%s", dep, raw)
+	}
+}
+
+func TestRollbackGit(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	if _, err := e.st.CreateDomain(ctx, e.app.ID, "shop.example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	e.router.known[e.app.ID] = true
+	b := &fakeBuilder{commit: strings.Repeat("a", 40), images: e.ex}
+	e.useGit(b)
+	first := e.deploy()
+	b.commit = strings.Repeat("b", 40)
+	second := e.deploy()
+	b.buildErr = errors.New("compile error")
+	broken := e.deploy()
+	b.buildErr = nil
+	if first.Status != store.DeploySucceeded || second.Status != store.DeploySucceeded || broken.Status != store.DeployFailed {
+		t.Fatalf("setup: %s %s %s", first.Status, second.Status, broken.Status)
+	}
+
+	app, _ := e.st.GetApp(ctx, e.app.ID)
+	targets, err := e.svc.RollbackTargets(ctx, app, []store.Deployment{first, second, broken})
+	if err != nil || !targets[first.ID] || targets[second.ID] || targets[broken.ID] {
+		t.Fatalf("targets = %v %v, want only the first", targets, err)
+	}
+	for _, id := range []string{second.ID, broken.ID} {
+		if _, err := e.svc.Rollback(ctx, id); !errors.Is(err, ErrNoRollback) {
+			t.Errorf("rollback to %s: %v, want ErrNoRollback", id, err)
+		}
+	}
+
+	dep, err := e.svc.Rollback(ctx, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.svc.Wait()
+	dep, _ = e.st.GetDeployment(ctx, dep.ID)
+	if dep.Status != store.DeploySucceeded || dep.Trigger != store.TriggerRollback || dep.RollbackOf != first.ID ||
+		dep.Image != first.Image || dep.CommitSHA != first.CommitSHA || dep.Port != first.Port {
+		t.Fatalf("rollback = %+v", dep)
+	}
+	if len(b.tags) != 2 {
+		t.Errorf("built %v: a rollback must not build", b.tags)
+	}
+	if got := phaseNames(dep); len(got) == 0 || got[0] != store.PhaseStarting {
+		t.Errorf("phases = %v: a Git rollback starts at %q", got, store.PhaseStarting)
+	}
+	if app, _ := e.st.GetApp(ctx, e.app.ID); app.CurrentDeploymentID != dep.ID {
+		t.Errorf("current = %s, want the rollback", app.CurrentDeploymentID)
+	}
+	if cs := e.containers(); len(cs) != 1 || cs[0].Image != first.Image {
+		t.Errorf("containers = %+v", cs)
+	}
+	if got := e.router.last(e.app.ID); len(got) != 1 || !strings.Contains(got[0], dep.ContainerName) {
+		t.Errorf("route = %v", got)
+	}
+	raw, _ := os.ReadFile(e.svc.LogPath(dep))
+	if !strings.Contains(string(raw), "Rolling back web to deployment "+first.ID+" (commit "+first.CommitSHA) || strings.Contains(string(raw), "Fetching") {
+		t.Errorf("log:\n%s", raw)
+	}
+
+	// The second deployment is not live any more: it can be returned to. A pruned image cannot.
+	app, _ = e.st.GetApp(ctx, e.app.ID)
+	if targets, _ := e.svc.RollbackTargets(ctx, app, []store.Deployment{first, second}); !targets[second.ID] || targets[first.ID] {
+		t.Errorf("targets after rollback = %v", targets)
+	}
+	images, _ := e.ex.ListBuildImages(ctx, e.app.ID)
+	for _, img := range images {
+		if slices.Contains(img.Tags, second.Image) {
+			if err := e.ex.RemoveImage(ctx, img.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if _, err := e.svc.Rollback(ctx, second.ID); !errors.Is(err, ErrNoRollback) {
+		t.Errorf("rollback to a pruned image: %v", err)
+	}
+}
+
+func TestRollbackImage(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	first := e.deploy()
+	e.setImage("nginx:2")
+	if dep := e.deploy(); dep.Status != store.DeploySucceeded {
+		t.Fatal(dep)
+	}
+	dep, err := e.svc.Rollback(ctx, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.svc.Wait()
+	dep, _ = e.st.GetDeployment(ctx, dep.ID)
+	raw, _ := os.ReadFile(e.svc.LogPath(dep))
+	if dep.Status != store.DeploySucceeded || dep.Image != "nginx:1" || !strings.Contains(string(raw), "Pulling image nginx:1") {
+		t.Fatalf("rollback = %+v\n%s", dep, raw)
+	}
+	// The app's settings follow, so a redeploy stays on the rolled-back image.
+	if app, _ := e.st.GetApp(ctx, e.app.ID); app.Image != "nginx:1" {
+		t.Errorf("app image = %s, want nginx:1", app.Image)
+	}
+	if !strings.Contains(string(raw), "The app's image is now nginx:1") {
+		t.Errorf("log:\n%s", raw)
+	}
+}
+
+// phaseNames lists the phases a deployment went through, the closing status included.
+func phaseNames(d store.Deployment) []string {
+	out := make([]string, len(d.Phases))
+	for i, p := range d.Phases {
+		out[i] = p.Phase
+	}
+	return out
+}
+
+func TestDeployPhases(t *testing.T) {
+	e, ctx := newEnv(t), context.Background()
+	if _, err := e.st.CreateDomain(ctx, e.app.ID, "shop.example.com", ""); err != nil {
+		t.Fatal(err)
+	}
+	e.router.known[e.app.ID] = true
+
+	dep := e.deploy()
+	want := []string{store.PhasePulling, store.PhaseStarting, store.PhaseHealthChecking, store.PhaseSwitching, store.PhaseDraining, store.DeploySucceeded}
+	if got := phaseNames(dep); !slices.Equal(got, want) {
+		t.Fatalf("phases = %v, want %v", got, want)
+	}
+	if dep.Phase != store.PhaseDraining {
+		t.Errorf("phase = %q, want %q", dep.Phase, store.PhaseDraining)
+	}
+	for i := 1; i < len(dep.Phases); i++ {
+		if dep.Phases[i].At.Before(dep.Phases[i-1].At) {
+			t.Errorf("phase %d starts before phase %d: %+v", i, i-1, dep.Phases)
+		}
+	}
+
+	// A failure ends the timeline in the phase it failed in.
+	e.setImage("crasher:1")
+	e.ex.CrashOnStart["crasher:1"] = true
+	dep = e.deploy()
+	if dep.Status != store.DeployFailed || dep.Phase != store.PhaseHealthChecking {
+		t.Errorf("crash: status %q phase %q, want failed in %q", dep.Status, dep.Phase, store.PhaseHealthChecking)
+	}
+	if got := phaseNames(dep); !slices.Equal(got, []string{store.PhasePulling, store.PhaseStarting, store.PhaseHealthChecking, store.DeployFailed}) {
+		t.Errorf("crash: phases = %v", got)
+	}
+
+	e.setImage("registry.example/missing:1")
+	if dep = e.deploy(); dep.Phase != store.PhasePulling {
+		t.Errorf("missing image: phase %q, want %q", dep.Phase, store.PhasePulling)
+	}
+
+	e.setImage("nginx:3")
+	e.router.failAll = true
+	if dep = e.deploy(); dep.Phase != store.PhaseSwitching {
+		t.Errorf("proxy down: phase %q, want %q", dep.Phase, store.PhaseSwitching)
+	}
+}
+
+func TestDeployPhasesGit(t *testing.T) {
+	e := newEnv(t)
+	b := &fakeBuilder{commit: strings.Repeat("cd34", 10)}
+	e.useGit(b)
+	dep := e.deploy()
+	want := []string{store.PhaseBuilding, store.PhaseStarting, store.PhaseHealthChecking, store.PhaseSwitching, store.PhaseDraining, store.DeploySucceeded}
+	if got := phaseNames(dep); dep.Status != store.DeploySucceeded || !slices.Equal(got, want) {
+		t.Fatalf("status %q, phases = %v, want %v", dep.Status, got, want)
 	}
 }

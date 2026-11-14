@@ -9,11 +9,11 @@ name; it lives only in `internal/brand/brand.go`.
 
 **Progress:** M0 ◐ · M1 ◐ · M2 ◐ (nearly done) · M3 ◐ · M4 ☐ · M5 ☐ · M6 ◐
 
-**Where we are (2026-11-13, v0.6.0):** M2 is done except pushing builds to a registry, more builders (Nixpacks, Buildpacks, Static), a Gitea token, a build-time env flag and cron. M3 has push/CI webhooks and health checks before the traffic switch; rollback and the deploy state machine are next. v0.6.0 checked on the VPS (2026-11-14): build caps, resume after restart, deploy keys, private registries, deploy webhooks, Railpack without a Dockerfile, cancel in the browser.
+**Where we are (2026-11-13, v0.6.0):** M2 is done except pushing builds to a registry, more builders (Nixpacks, Buildpacks, Static), a Gitea token, a build-time env flag and cron. M3 has push/CI webhooks, health checks before the traffic switch, rollback, and the deploy state machine with its timeline; the rolling strategy with a real drain is next. v0.6.0 checked on the VPS (2026-11-14): build caps, resume after restart, deploy keys, private registries, deploy webhooks, Railpack without a Dockerfile, cancel in the browser.
 
 **Next up:**
-1. On the VPS (manual), once released: save an HTTP check on an app and deploy (log shows "Health check passed"); set a wrong path or status and deploy (fails after the start period, the old container keeps serving); create a new app and check it gets the TCP check.
-2. Code, M3: rollback to one of the 5 kept images without a build, then the deploy timeline per state.
+1. On the VPS (manual), once released: save an HTTP check on an app and deploy (log shows "Health check passed"); set a wrong path or status and deploy (fails after the start period, the old container keeps serving); create a new app and check it gets the TCP check. Roll a Git app back to an earlier commit (no build in the log).
+2. Code, M3: rolling strategy with a real drain (default 10 s before the old container goes), then recreate for apps with volumes or host ports (adds the `rolled_back` exit).
 3. Then: push builds to a registry (closes M2), or M4 databases (Postgres, MariaDB, S3 backups).
 4. Check whether "Build log stream on the deployment page" is already covered by the deployment log (Git build output streams there with `|` lines) and tick it if so.
 5. Record the fresh-install time with image download (M1, "Under 60 seconds").
@@ -213,8 +213,8 @@ Goal: push-to-deploy from a repository with any of the builders.
 Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 
 ### State machine (`internal/deploy`)
-- [ ] States: `queued → building → starting → health_checking → switching → draining → succeeded`
-- [ ] Exits: `failed`, `cancelled`, `rolled_back`
+- [x] States: `queued → building → starting → health_checking → switching → draining → succeeded` — `status` stays queued / running / succeeded / failed / cancelled; while running, `phase` is the step (`pulling` for an image app instead of `building`; a Git rollback goes straight to `starting`) and `phases` records each step entered with its time, closed by the final status (`0014_deployment_phases.sql`, `EnterDeploymentPhase`). A failed deployment keeps the phase it failed in. `TestDeployPhases`, `TestDeployPhasesGit`, `TestDeploymentPhasesAPI`; checked in the browser with an image app (2026-11-14). Draining is still an immediate remove (graceful drain comes with the rolling strategy)
+- [~] Exits: `failed`, `cancelled`, `rolled_back` — failed and cancelled; `rolled_back` comes with the recreate strategy, the only one that rolls back by itself
 - [x] Resume or fail cleanly after a panel restart mid-deploy; no orphan containers — see Jobs and queue (M2); per-state resume comes with the state machine
 
 ### Health checks
@@ -233,7 +233,7 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 - [x] Volumes CRUD and mounts — named volumes, bind mounts and inline files per app (`0006_app_mounts.sql`, `internal/deploy/mounts.go`); file content written per deployment so editing never changes the live container; tested in `internal/deploy/mounts_test.go` and `internal/store/mounts_test.go`
 
 ### Rollback and triggers
-- [ ] Rollback to a kept image through the same pipeline, without a build
+- [x] Rollback to a kept image through the same pipeline, without a build — `POST /api/deployments/{id}/rollback` makes a new deployment (trigger `rollback`, `rollback_of`, `0013_deployment_rollback.sql`) with the earlier image, commit and port; start, health check and switch as usual. A Git app returns to the images still kept (5); an image app pulls the image again and its image setting follows, so a redeploy stays on it. Offered for succeeded deployments whose image is not the live one (`TestRollbackGit`, `TestRollbackImage`, `TestRollbackAPI`); checked in the browser with an image app (2026-11-14). An image app on a moving tag (`latest`) gets whatever the tag points to now
 - [ ] Manual deploy (button and API)
 - [~] Git push webhooks, filtered by branch and optional path — one URL per app takes push events from GitHub (JSON or its default form encoding), GitLab, Gitea and Forgejo: a push to the app's branch deploys; other branches, tags, deleted branches and other events are ignored with the reason; ping answers OK. Pushes during a deploy queue one follow-up deploy, so a burst ships the last commit (`DeployOrQueue`). `TestDeployHook`; checked against real Docker and Caddy (ping, other branch ignored, three pushes → two deploys, 2026-11-13). No path filter yet; the GitHub App's own webhook is not used (a repository webhook is). A push to a GitHub repository with the webhook deployed on a real VPS with v0.6.0 (2026-11-14)
 - [x] Deploy webhook `POST /api/hooks/deploy/<token>` with optional image tag or commit — CI calls it with no event; an image app can pass `{"tag": "…"}` (or `?tag=`), which swaps only the tag of its image (`TestWithTag`). The token (24 random bytes) is the only credential: stored hashed for lookup and encrypted for display (`0011_deploy_hooks.sql`); 60 calls a minute per IP; webhook deploys show as `webhook` / `push` triggers and in the activity as actor `webhook`. Commits: a Git app always builds its branch tip
@@ -247,8 +247,8 @@ Goal: zero-downtime deploys you can trust, with rollback and every trigger.
 
 ### UI
 - [x] Health check settings — app Settings → Health check: type, path, expected status, start period, interval, timeout, failures in a row; checked in a browser (2026-11-14)
-- [ ] Deployment timeline with per-state timing
-- [ ] Rollback picker
+- [x] Deployment timeline with per-state timing — above the log of the selected deployment: one bar per step on a shared scale, with its duration, the running step live, the step it failed or was cancelled in marked; the list shows a running deployment's step. Deployments from before have none ("No steps recorded")
+- [x] Rollback picker — select a deployment in the Deployments tab, "Roll back to this" with a confirmation in its log panel; rollbacks are marked ↩ in the list and get the usual deploy toasts
 - [x] Webhook and auto-deploy settings — Deploy webhook panel in the app's Settings: URL with Copy, how to add it on GitHub, GitLab and Gitea (or a curl line for image apps), a warning when the panel is reached on a local address
 - [ ] Certificates page
 - [x] Container terminal (WebSocket + xterm.js) — `internal/api/terminal.go`, `internal/executor/terminal.go`, `web/src/components/container-terminal.tsx`; tested in `internal/api/terminal_test.go` and on a real VPS (2026-11-13)
